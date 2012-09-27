@@ -1573,8 +1573,16 @@ std::string Driver::GetFilePath(const char *Name, const ToolChain &TC) const {
 
 std::string Driver::GetProgramPath(const char *Name,
                                    const ToolChain &TC) const {
+  std::string N(Name);
+#ifdef __MINGW32__
+  // We expect callers never pass Name ends with uppercase ".EXE"
+  std::string Suffix(".exe");
+  if (N.length() < Suffix.length() ||
+      (N.compare(N.length() - Suffix.length(), Suffix.length(), Suffix)) != 0)
+    N += ".exe";
+#endif
   // FIXME: Needs a better variable than DefaultTargetTriple
-  std::string TargetSpecificExecutable(DefaultTargetTriple + "-" + Name);
+  std::string TargetSpecificExecutable(DefaultTargetTriple + "-" + N);
   // Respect a limited subset of the '-Bprefix' functionality in GCC by
   // attempting to use this prefix when looking for program paths.
   for (Driver::prefix_list::const_iterator it = PrefixDirs.begin(),
@@ -1585,10 +1593,10 @@ std::string Driver::GetProgramPath(const char *Name,
       P.appendComponent(TargetSpecificExecutable);
       if (P.canExecute()) return P.str();
       P.eraseComponent();
-      P.appendComponent(Name);
+      P.appendComponent(N);
       if (P.canExecute()) return P.str();
     } else {
-      llvm::sys::Path P(*it + Name);
+      llvm::sys::Path P(*it + N);
       if (P.canExecute()) return P.str();
     }
   }
@@ -1600,7 +1608,7 @@ std::string Driver::GetProgramPath(const char *Name,
     P.appendComponent(TargetSpecificExecutable);
     if (P.canExecute()) return P.str();
     P.eraseComponent();
-    P.appendComponent(Name);
+    P.appendComponent(N);
     if (P.canExecute()) return P.str();
   }
 
@@ -1610,10 +1618,11 @@ std::string Driver::GetProgramPath(const char *Name,
   if (!P.empty())
     return P.str();
 
-  P = llvm::sys::Path(llvm::sys::Program::FindProgramByName(Name));
+  P = llvm::sys::Path(llvm::sys::Program::FindProgramByName(N));
   if (!P.empty())
     return P.str();
 
+  // Return the original Name, not N
   return Name;
 }
 
