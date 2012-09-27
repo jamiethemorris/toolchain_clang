@@ -2290,6 +2290,12 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
       addPathIfExists((GCCInstallation.getInstallPath() +
                        GCCInstallation.getMultiarchSuffix()),
                       Paths);
+    if (IsAndroid) {
+      // Add libstdc++ path
+      const std::string LibstdcppPath = getDriver().Dir + "/../" + GCCTriple.str() +
+                "/lib" + GCCInstallation.getMultiarchSuffix().str();
+      addPathIfExists(LibstdcppPath, Paths);
+    }
 
     // If the GCC installation we found is inside of the sysroot, we want to
     // prefer libraries installed in the parent prefix of the GCC installation.
