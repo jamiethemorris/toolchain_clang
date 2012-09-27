@@ -2297,6 +2297,12 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
                        GCCInstallation.getMultiLibSuffix() +
                        GCCInstallation.getBiarchSuffix()),
                       Paths);
+    if (IsAndroid) {
+      // Add libstdc++ path
+      const std::string LibstdcppPath = getDriver().Dir + "/../" + GCCTriple.str() +
+                "/lib" + GCCInstallation.getMultiarchSuffix().str();
+      addPathIfExists(LibstdcppPath, Paths);
+    }
 
     // GCC cross compiling toolchains will install target libraries which ship
     // as part of the toolchain under <prefix>/<triple>/<libdir> rather than as
