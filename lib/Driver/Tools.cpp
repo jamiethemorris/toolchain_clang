@@ -579,6 +579,8 @@ static void addFPUArgs(const Driver &D, const Arg *A, const ArgList &Args,
     CmdArgs.push_back("-target-feature");
     CmdArgs.push_back("+vfp2");
     CmdArgs.push_back("-target-feature");
+    CmdArgs.push_back("+d16");
+    CmdArgs.push_back("-target-feature");
     CmdArgs.push_back("-neon");
   } else if (FPU == "vfp3" || FPU == "vfpv3") {
     CmdArgs.push_back("-target-feature");
