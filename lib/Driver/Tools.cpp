@@ -5967,6 +5967,7 @@ void ndktools::Link::ConstructJob(Compilation &C, const JobAction &JA,
                                   const char *LinkingOutput) const {
   const toolchains::NDKClang& ToolChain =
     static_cast<const toolchains::NDKClang&>(getToolChain());
+  const Driver &D = getToolChain().getDriver();
 
   ArgStringList CmdArgs;
 
@@ -5976,6 +5977,9 @@ void ndktools::Link::ConstructJob(Compilation &C, const JobAction &JA,
   if (Args.hasArg(options::OPT_shared)) {
     CmdArgs.push_back("-shared");
   }
+
+  if (!D.SysRoot.empty())
+    CmdArgs.push_back(Args.MakeArgString("--sysroot=" + D.SysRoot));
 
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
