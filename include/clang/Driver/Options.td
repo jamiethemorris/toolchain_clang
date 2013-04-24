@@ -1401,6 +1401,10 @@ def falign_functions_EQ : Joined<["-"], "falign-functions=">, Group<clang_ignore
 
 def ffixed_line_length_VALUE : Joined<["-"], "ffixed-line-length-">, Group<clang_ignored_f_Group>;
 
+// Promote global variables with constructor to constant
+def fglobal_ctor_const_promotion: Flag<["-"], "fglobal-ctor-const-promotion">, Group<f_Group>;
+def fno_global_ctor_const_promotion: Flag<["-"], "fno-global-ctor-const-promotion">, Group<f_Group>;
+
 defm eliminate_unused_debug_types : BooleanFFlag<"eliminate-unused-debug-types">, Group<clang_ignored_f_Group>;
 defm float_store : BooleanFFlag<"float-store">, Group<clang_ignored_f_Group>;
 defm function_attribute_list : BooleanFFlag<"function-attribute-list">, Group<clang_ignored_f_Group>;
