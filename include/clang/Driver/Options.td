@@ -1261,4 +1261,8 @@ def Z_reserved_lib_stdcxx : Flag<["-"], "Z-reserved-lib-stdc++">,
 def Z_reserved_lib_cckext : Flag<["-"], "Z-reserved-lib-cckext">,
     Flags<[LinkerInput, NoArgumentUnused, Unsupported]>, Group<reserved_lib_Group>;
 
+// Promote global variables with constructor to constant
+def fglobal_ctor_const_promotion: Flag<["-"], "fglobal-ctor-const-promotion">, Group<f_Group>;
+def fno_global_ctor_const_promotion: Flag<["-"], "fno-global-ctor-const-promotion">, Group<f_Group>;
+
 include "CC1Options.td"

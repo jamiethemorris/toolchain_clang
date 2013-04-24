@@ -2925,6 +2925,14 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-arm-strict-align");
   }
 
+  if (!Args.hasFlag(options::OPT_fglobal_ctor_const_promotion,
+                    options::OPT_fno_global_ctor_const_promotion,
+                    getToolChain().getTriple().getEnvironment() !=
+                    llvm::Triple::Android)) {
+    CmdArgs.push_back("-mllvm");
+    CmdArgs.push_back("-disable-global-ctor-const-promotion");
+  }
+
   // Forward -f options with positive and negative forms; we translate
   // these by hand.
 
