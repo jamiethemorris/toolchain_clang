@@ -1605,6 +1605,9 @@ defm stack_arrays : BooleanFFlag<"stack-arrays">, Group<gfortran_Group>;
 defm underscoring : BooleanFFlag<"underscoring">, Group<gfortran_Group>;
 defm whole_file : BooleanFFlag<"whole-file">, Group<gfortran_Group>;
 
+// Promote global variables with constructor to constant
+def fglobal_ctor_const_promotion: Flag<["-"], "fglobal-ctor-const-promotion">, Group<f_Group>;
+def fno_global_ctor_const_promotion: Flag<["-"], "fno-global-ctor-const-promotion">, Group<f_Group>;
 
 include "CC1Options.td"
 
