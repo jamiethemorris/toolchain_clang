@@ -108,7 +108,7 @@ protected:
       SmallVectorImpl<StringRef> &MultiarchLibDirs,
       SmallVectorImpl<StringRef> &MultiarchTripleAliases);
 
-    void ScanLibDirForGCCTriple(llvm::Triple::ArchType TargetArch,
+    void ScanLibDirForGCCTriple(const llvm::Triple &TargetTriple,
                                 const ArgList &Args,
                                 const std::string &LibDir,
                                 StringRef CandidateTriple,
