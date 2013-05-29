@@ -638,8 +638,15 @@ class AndroidTargetInfo : public OSTargetInfo<Target> {
  protected:
   virtual void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
                             MacroBuilder &Builder) const {
-    Builder.defineMacro("__ANDROID__");
+    DefineStd(Builder, "unix", Opts);
+    DefineStd(Builder, "linux", Opts);
+    Builder.defineMacro("__gnu_linux__");
     Builder.defineMacro("__ELF__");
+    Builder.defineMacro("__ANDROID__", "1");
+    if (Opts.POSIXThreads)
+      Builder.defineMacro("_REENTRANT");
+    if (Opts.CPlusPlus)
+      Builder.defineMacro("_GNU_SOURCE");
   }
  public:
   AndroidTargetInfo(const std::string &triple)
@@ -5154,6 +5161,9 @@ class AndroidNDKTargetInfo : public TargetInfo {
 public:
   AndroidNDKTargetInfo(const std::string& TripleStr);
 
+  virtual void getArchDefines(const LangOptions &Opts,
+                              MacroBuilder &Builder) const;
+
   virtual void getTargetDefines(const LangOptions& Opts,
                                 MacroBuilder& Builder) const;
 
@@ -5213,10 +5223,17 @@ AndroidNDKTargetInfo::AndroidNDKTargetInfo(const std::string& Triple)
                       "v128:64:128-a0:0:64-n32-S64";
 }
 
+void AndroidNDKTargetInfo::getArchDefines(const LangOptions& Opts,
+                                         MacroBuilder& Builder) const {
+  Builder.defineMacro("__le32__");
+  Builder.defineMacro("__ANDROID__");
+}
+
 void AndroidNDKTargetInfo::getTargetDefines(const LangOptions& Opts,
                                          MacroBuilder& Builder) const {
-  Builder.defineMacro("__ANDROID__");
   Builder.defineMacro("__ELF__");
+  Builder.defineMacro("__LITTLE_ENDIAN__");
+  getArchDefines(Opts, Builder);
 }
 } // end anonymous namespace
 
