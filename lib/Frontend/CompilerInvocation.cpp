@@ -1290,6 +1290,10 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.CXXExceptions = Args.hasArg(OPT_fcxx_exceptions);
   Opts.SjLjExceptions = Args.hasArg(OPT_fsjlj_exceptions);
   Opts.TraditionalCPP = Args.hasArg(OPT_traditional_cpp);
+  Opts.CXXMissingReturnSemantics =
+    Args.hasFlag(OPT_fcxx_missing_return_semantics,
+                 OPT_fno_cxx_missing_return_semantics,
+                 Opts.CXXMissingReturnSemantics);
 
   Opts.RTTI = !Args.hasArg(OPT_fno_rtti);
   Opts.Blocks = Args.hasArg(OPT_fblocks);
