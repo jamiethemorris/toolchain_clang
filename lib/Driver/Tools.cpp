@@ -845,6 +845,14 @@ void Clang::AddARMTargetArgs(const ArgList &Args,
       CmdArgs.push_back("-backend-option");
       CmdArgs.push_back("-arm-reserve-r9");
     }
+    // Enable ARM EHABI exception handling table generation for Android
+    if (Triple.getEnvironment() == llvm::Triple::Android) {
+      CmdArgs.push_back("-backend-option");
+      CmdArgs.push_back("-arm-enable-ehabi");
+
+      CmdArgs.push_back("-backend-option");
+      CmdArgs.push_back("-arm-enable-ehabi-descriptors");
+    }
 }
 
 // Translate MIPS CPU name alias option to CPU name.
