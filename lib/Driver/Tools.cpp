@@ -6106,7 +6106,13 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
   // forward.
   if (D.IsUsingLTO(Args) || Args.hasArg(options::OPT_use_gold_plugin)) {
     CmdArgs.push_back("-plugin");
+#if defined(_WIN32)
+    std::string Plugin = ToolChain.getDriver().Dir + "/LLVMgold.dll";
+#elif defined(__APPLE__)
+    std::string Plugin = ToolChain.getDriver().Dir + "/../lib/LLVMgold.dylib";
+#else
     std::string Plugin = ToolChain.getDriver().Dir + "/../lib/LLVMgold.so";
+#endif
     CmdArgs.push_back(Args.MakeArgString(Plugin));
 
     // Try to pass driver level flags relevant to LTO code generation down to
