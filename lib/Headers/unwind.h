@@ -194,6 +194,12 @@ _Unwind_Word _Unwind_GetIP(struct _Unwind_Context *);
 void _Unwind_SetIP(struct _Unwind_Context *, _Unwind_Word);
 #endif
 
+static inline uintptr_t _Unwind_GetIP(struct _Unwind_Context *context) {
+  uintptr_t ip = 0;
+  _Unwind_VRS_Get(context, _UVRSC_CORE, 15, _UVRSD_UINT32, &ip);
+  ip &= ~(uintptr_t)0x1; /* remove thumb mode bit */
+  return ip;
+}
 
 _Unwind_Word _Unwind_GetIPInfo(struct _Unwind_Context *, int *);
 
