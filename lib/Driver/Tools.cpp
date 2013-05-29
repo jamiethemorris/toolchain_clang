@@ -1341,6 +1341,11 @@ void Clang::AddX86TargetArgs(const ArgList &Args,
   // attributes here.
   llvm::StringMap<unsigned> PrevFeature;
   std::vector<const char*> Features;
+  if (getToolChain().getTriple().getEnvironment() == llvm::Triple::Android) {
+    // Add -msse3
+    PrevFeature["sse3"] = Features.size() + 1;
+    Features.push_back("+sse3");
+  }
   for (arg_iterator it = Args.filtered_begin(options::OPT_m_x86_Features_Group),
          ie = Args.filtered_end(); it != ie; ++it) {
     StringRef Name = (*it)->getOption().getName();
