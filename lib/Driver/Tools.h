@@ -653,8 +653,9 @@ namespace XCore {
   };
 } // end namespace XCore.
 
+extern const char *GetLinkerName(const llvm::opt::ArgList &Args);
 
-} // end namespace toolchains
+} // end namespace tools
 } // end namespace driver
 } // end namespace clang
 

@@ -253,6 +253,19 @@ static bool forwardToGCC(const Option &O) {
          !O.hasFlag(options::LinkerInput);
 }
 
+const char *clang::driver::tools::GetLinkerName(const ArgList &Args) {
+  if (Arg *A = Args.getLastArg(options::OPT_fuse_ld_EQ)) {
+    StringRef LDSuffix(A->getValue(0));
+    if (LDSuffix == "bfd")
+      return "ld.bfd";
+    if (LDSuffix == "gold")
+      return "ld.gold";
+    if (LDSuffix == "mcld")
+      return "ld.mcld";
+  }
+  return "ld";
+}
+
 void Clang::AddPreprocessingOptions(Compilation &C,
                                     const JobAction &JA,
                                     const Driver &D,
@@ -5256,7 +5269,7 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_F);
 
   const char *Exec =
-    Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -5453,7 +5466,7 @@ void solaris::Link::ConstructJob(Compilation &C, const JobAction &JA,
   addProfileRT(getToolChain(), Args, CmdArgs, getToolChain().getTriple());
 
   const char *Exec =
-    Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -5565,7 +5578,7 @@ void auroraux::Link::ConstructJob(Compilation &C, const JobAction &JA,
   addProfileRT(getToolChain(), Args, CmdArgs, getToolChain().getTriple());
 
   const char *Exec =
-    Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -5745,7 +5758,7 @@ void openbsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   const char *Exec =
-    Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -5885,7 +5898,7 @@ void bitrig::Link::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   const char *Exec =
-    Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -6142,7 +6155,7 @@ void freebsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
   addProfileRT(ToolChain, Args, CmdArgs, ToolChain.getTriple());
 
   const char *Exec =
-    Args.MakeArgString(ToolChain.GetProgramPath("ld"));
+    Args.MakeArgString(ToolChain.GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -6390,7 +6403,8 @@ void netbsd::Link::ConstructJob(Compilation &C, const JobAction &JA,
 
   addProfileRT(getToolChain(), Args, CmdArgs, getToolChain().getTriple());
 
-  const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+  const char *Exec =
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -6922,7 +6936,8 @@ void minix::Link::ConstructJob(Compilation &C, const JobAction &JA,
          Args.MakeArgString(getToolChain().GetFilePath("crtend.o")));
   }
 
-  const char *Exec = Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+  const char *Exec =
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 
@@ -7106,7 +7121,7 @@ void dragonfly::Link::ConstructJob(Compilation &C, const JobAction &JA,
   addProfileRT(getToolChain(), Args, CmdArgs, getToolChain().getTriple());
 
   const char *Exec =
-    Args.MakeArgString(getToolChain().GetProgramPath("ld"));
+    Args.MakeArgString(getToolChain().GetProgramPath(GetLinkerName(Args)));
   C.addCommand(new Command(JA, *this, Exec, CmdArgs));
 }
 

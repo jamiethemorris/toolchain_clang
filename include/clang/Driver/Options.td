@@ -362,6 +362,7 @@ def fno_address_sanitizer : Flag<["-"], "fno-address-sanitizer">, Group<f_Group>
 def fthread_sanitizer : Flag<["-"], "fthread-sanitizer">, Group<f_Group>;
 def fno_thread_sanitizer : Flag<["-"], "fno-thread-sanitizer">, Group<f_Group>;
 def fasm : Flag<["-"], "fasm">, Group<f_Group>;
+def fuse_ld_EQ : Joined<["-"], "fuse-ld=">, Group<f_Group>;
 
 def fasm_blocks : Flag<["-"], "fasm-blocks">, Group<f_Group>, Flags<[CC1Option]>;
 def fno_asm_blocks : Flag<["-"], "fno-asm-blocks">, Group<f_Group>;
@@ -1482,7 +1483,6 @@ def fprofile_dir : Joined<["-"], "fprofile-dir=">, Group<clang_ignored_f_Group>;
 
 defm profile_use : BooleanFFlag<"profile-use">, Group<clang_ignored_f_Group>;
 def fprofile_use_EQ : Joined<["-"], "fprofile-use=">, Group<clang_ignored_f_Group>;
-def fuse_ld_EQ : Joined<["-"], "fuse-ld=">, Group<clang_ignored_f_Group>;
 
 defm align_functions : BooleanFFlag<"align-functions">, Group<clang_ignored_f_Group>;
 def falign_functions_EQ : Joined<["-"], "falign-functions=">, Group<clang_ignored_f_Group>;
