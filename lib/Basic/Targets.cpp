@@ -632,6 +632,41 @@ class NaClTargetInfo : public OSTargetInfo<Target> {
         Target::checkCallingConvention(CC);
   }
 };
+
+template <typename Target>
+class AndroidTargetInfo : public OSTargetInfo<Target> {
+ protected:
+  virtual void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                            MacroBuilder &Builder) const {
+    Builder.defineMacro("__ANDROID__");
+    Builder.defineMacro("__ELF__");
+  }
+ public:
+  AndroidTargetInfo(const std::string &triple)
+    : OSTargetInfo<Target>(triple) {
+    this->NoAsmVariants = true;
+
+    this->DoubleAlign = 64;
+    this->LongLongAlign = 64;
+    this->LongDoubleAlign = 64;
+    this->SuitableAlign = 64;
+
+    this->SizeType = TargetInfo::UnsignedInt;
+    this->PtrDiffType = TargetInfo::SignedInt;
+    this->IntPtrType = TargetInfo::SignedInt;
+
+    this->MaxAtomicPromoteWidth = 64;
+    this->MaxAtomicInlineWidth = 64;
+    this->RegParmMax = 3;
+    this->UseZeroLengthBitfieldAlignment = true;
+
+    this->TheCXXABI.set(TargetCXXABI::GenericARM);
+
+    this->DescriptionString = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
+                              "i64:32:64-f32:32:32-f64:32:64-v64:64:64-"
+                              "v128:64:128-a0:0:64-n32-S64";
+  }
+};
 } // end anonymous namespace.
 
 //===----------------------------------------------------------------------===//
@@ -5113,6 +5148,78 @@ void PNaClTargetInfo::getGCCRegAliases(const GCCRegAlias *&Aliases,
 }
 } // end anonymous namespace.
 
+
+namespace {
+class AndroidNDKTargetInfo : public TargetInfo {
+public:
+  AndroidNDKTargetInfo(const std::string& TripleStr);
+
+  virtual void getTargetDefines(const LangOptions& Opts,
+                                MacroBuilder& Builder) const;
+
+  virtual BuiltinVaListKind getBuiltinVaListKind() const {
+    return TargetInfo::CharPtrBuiltinVaList;
+  }
+
+  virtual void getTargetBuiltins(const Builtin::Info*& Records,
+                                 unsigned& NumRecords) const {
+  }
+
+  virtual const char* getClobbers() const {
+    return "";
+  }
+
+  virtual void getGCCRegNames(const char* const*& Names,
+                              unsigned& NumNames) const {
+    Names = NULL;
+    NumNames = 0;
+  }
+
+  virtual void getGCCRegAliases(const TargetInfo::GCCRegAlias*& Aliases,
+                                unsigned& NumAliases) const {
+    Aliases = NULL;
+    NumAliases = 0;
+  }
+
+  virtual bool validateAsmConstraint(const char*& Name,
+                                     TargetInfo::ConstraintInfo& Info) const {
+    return false;
+  }
+};
+
+AndroidNDKTargetInfo::AndroidNDKTargetInfo(const std::string& Triple)
+    : TargetInfo(Triple) {
+  BigEndian = false;
+  NoAsmVariants = true;
+
+  DoubleAlign = 64;
+  LongLongAlign = 64;
+  LongDoubleAlign = 64;
+  SuitableAlign = 64;
+
+  SizeType = UnsignedInt;
+  PtrDiffType = SignedInt;
+  IntPtrType = SignedInt;
+
+  MaxAtomicPromoteWidth = 64;
+  MaxAtomicInlineWidth = 64;
+  RegParmMax = 3;
+  UseZeroLengthBitfieldAlignment = true;
+
+  TheCXXABI.set(TargetCXXABI::GenericARM);
+
+  DescriptionString = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
+                      "i64:32:64-f32:32:32-f64:32:64-v64:64:64-"
+                      "v128:64:128-a0:0:64-n32-S64";
+}
+
+void AndroidNDKTargetInfo::getTargetDefines(const LangOptions& Opts,
+                                         MacroBuilder& Builder) const {
+  Builder.defineMacro("__ANDROID__");
+  Builder.defineMacro("__ELF__");
+}
+} // end anonymous namespace
+
 namespace {
   static const unsigned SPIRAddrSpaceMap[] = {
     1,    // opencl_global
@@ -5319,6 +5426,8 @@ static TargetInfo *AllocateTarget(const std::string &T) {
     switch (os) {
       case llvm::Triple::NaCl:
         return new NaClTargetInfo<PNaClTargetInfo>(T);
+      case llvm::Triple::NDK:
+        return new AndroidTargetInfo<AndroidNDKTargetInfo>(T);
       default:
         return NULL;
     }

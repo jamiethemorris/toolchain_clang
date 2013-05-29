@@ -5960,6 +5960,42 @@ static bool hasMipsN32ABIArg(const ArgList &Args) {
   return A && (A->getValue() == StringRef("n32"));
 }
 
+void ndktools::Link::ConstructJob(Compilation &C, const JobAction &JA,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const ArgList &Args,
+                                  const char *LinkingOutput) const {
+  const toolchains::NDKClang& ToolChain =
+    static_cast<const toolchains::NDKClang&>(getToolChain());
+
+  ArgStringList CmdArgs;
+
+  // Silence warning for -emit-llvm
+  Args.ClaimAllArgs(options::OPT_emit_llvm);
+
+  if (Args.hasArg(options::OPT_shared)) {
+    CmdArgs.push_back("-shared");
+  }
+
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(Output.getFilename());
+
+  Args.AddAllArgs(CmdArgs, options::OPT_L);
+
+  const ToolChain::path_list Paths = ToolChain.getFilePaths();
+
+  for (ToolChain::path_list::const_iterator i = Paths.begin(), e = Paths.end();
+       i != e; ++i)
+    CmdArgs.push_back(Args.MakeArgString(StringRef("-L") + *i));
+
+  AddLinkerInputs(ToolChain, Inputs, Args, CmdArgs);
+
+  const char *Exec =
+    Args.MakeArgString(getToolChain().GetProgramPath("link"));
+
+  C.addCommand(new Command(JA, *this, Exec, CmdArgs));
+}
+
 void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
                                   const InputInfo &Output,
                                   const InputInfoList &Inputs,
