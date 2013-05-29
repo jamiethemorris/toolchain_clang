@@ -849,6 +849,15 @@ void Clang::AddARMTargetArgs(const ArgList &Args,
                     true))
     CmdArgs.push_back("-no-implicit-float");
 
+  // Enable ARM EHABI exception handling table generation for Android
+  if (Triple.getEnvironment() == llvm::Triple::Android) {
+    CmdArgs.push_back("-backend-option");
+    CmdArgs.push_back("-arm-enable-ehabi");
+
+    CmdArgs.push_back("-backend-option");
+    CmdArgs.push_back("-arm-enable-ehabi-descriptors");
+  }
+
     // llvm does not support reserving registers in general. There is support
     // for reserving r9 on ARM though (defined as a platform-specific register
     // in ARM EABI).
