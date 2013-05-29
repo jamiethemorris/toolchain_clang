@@ -111,6 +111,13 @@ _Unwind_VRS_Result _Unwind_VRS_Get(struct _Unwind_Context *__context,
   _Unwind_VRS_DataRepresentation __representation,
   void *__valuep);
 
+static inline uintptr_t _Unwind_GetIP(struct _Unwind_Context *context) {
+  uintptr_t ip = 0;
+  _Unwind_VRS_Get(context, _UVRSC_CORE, 15, _UVRSD_UINT32, &ip);
+  ip &= ~(uintptr_t)0x1; /* remove thumb mode bit */
+  return ip;
+}
+
 #else
 
 uintptr_t _Unwind_GetIP(struct _Unwind_Context* __context);
