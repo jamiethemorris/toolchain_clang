@@ -3023,8 +3023,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   // Translate -mstackrealign
+  bool DefaultStackRealign =
+    ((getToolChain().getTriple().getEnvironment() == llvm::Triple::Android) &&
+     (getToolChain().getTriple().getArch() == llvm::Triple::x86 ||
+      getToolChain().getTriple().getArch() == llvm::Triple::x86_64));
   if (Args.hasFlag(options::OPT_mstackrealign, options::OPT_mno_stackrealign,
-                   false)) {
+                   DefaultStackRealign)) {
     CmdArgs.push_back("-backend-option");
     CmdArgs.push_back("-force-align-stack");
   }
