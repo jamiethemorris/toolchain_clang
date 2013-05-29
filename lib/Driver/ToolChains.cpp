@@ -2221,7 +2221,7 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   PPaths.push_back(Twine(GCCInstallation.getParentLibPath() + "/../" +
                          GCCInstallation.getTriple().str() + "/bin").str());
 
-  Linker = GetProgramPath("ld");
+  Linker = GetProgramPath(tools::GetLinkerName(Args));
 
   Distro Distro = DetectDistro(Arch);
 

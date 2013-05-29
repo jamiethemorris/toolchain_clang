@@ -302,6 +302,7 @@ def fno_address_sanitizer : Flag<["-"], "fno-address-sanitizer">, Group<f_Group>
 def fthread_sanitizer : Flag<["-"], "fthread-sanitizer">, Group<f_Group>;
 def fno_thread_sanitizer : Flag<["-"], "fno-thread-sanitizer">, Group<f_Group>;
 def fasm : Flag<["-"], "fasm">, Group<f_Group>;
+def fuse_ld_EQ : Joined<["-"], "fuse-ld=">, Group<f_Group>;
 
 def fasm_blocks : Flag<["-"], "fasm-blocks">, Group<f_Group>, Flags<[CC1Option]>;
 def fno_asm_blocks : Flag<["-"], "fno-asm-blocks">, Group<f_Group>;
