@@ -838,6 +838,15 @@ void Clang::AddARMTargetArgs(const ArgList &Args,
                     options::OPT_mno_implicit_float,
                     true))
     CmdArgs.push_back("-no-implicit-float");
+
+  // Enable ARM EHABI exception handling table generation for Android
+  if (Triple.getEnvironment() == llvm::Triple::Android) {
+    CmdArgs.push_back("-backend-option");
+    CmdArgs.push_back("-arm-enable-ehabi");
+
+    CmdArgs.push_back("-backend-option");
+    CmdArgs.push_back("-arm-enable-ehabi-descriptors");
+  }
 }
 
 // Translate MIPS CPU name alias option to CPU name.
