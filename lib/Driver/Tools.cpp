@@ -6068,7 +6068,8 @@ static void AddLibgcc(llvm::Triple Triple, const Driver &D,
 
   if (StaticLibgcc && !isAndroid)
     CmdArgs.push_back("-lgcc_eh");
-  else if (!Args.hasArg(options::OPT_shared) && D.CCCIsCXX())
+  else if (!Args.hasArg(options::OPT_shared) && D.CCCIsCXX() &&
+           !StaticLibgcc && !isAndroid)
     CmdArgs.push_back("-lgcc");
 
   // According to Android ABI, we have to link with libdl if we are
