@@ -3821,6 +3821,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       D.Diag(diag::err_drv_clang_unsupported) << A->getAsString(Args);
   }
 
+  if (Arg *A = Args.getLastArg(options::OPT_fcxx_missing_return_semantics,
+                               options::OPT_fno_cxx_missing_return_semantics)) {
+    if (A->getOption().matches(options::OPT_fcxx_missing_return_semantics))
+      CmdArgs.push_back("-fcxx-missing-return-semantics");
+    else
+      CmdArgs.push_back("-fno-cxx-missing-return-semantics");
+  } else if (getToolChain().getTriple().getEnvironment() ==
+             llvm::Triple::Android) {
+    // For Android, we prefer to disable C++ missing return semantics when
+    // the user didn't specify the option.
+    CmdArgs.push_back("-fno-cxx-missing-return-semantics");
+  }
+
   Args.AddLastArg(CmdArgs, options::OPT_dM);
   Args.AddLastArg(CmdArgs, options::OPT_dD);
   

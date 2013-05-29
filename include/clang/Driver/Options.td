@@ -428,6 +428,8 @@ def fcxx_exceptions: Flag<["-"], "fcxx-exceptions">, Group<f_Group>,
   HelpText<"Enable C++ exceptions">, Flags<[CC1Option]>;
 def fcxx_modules : Flag <["-"], "fcxx-modules">, Group<f_Group>,
   Flags<[DriverOption]>;
+def fcxx_missing_return_semantics: Flag<["-"], "fcxx-missing-return-semantics">, Group<f_Group>, Flags<[CC1Option]>;
+def fno_cxx_missing_return_semantics: Flag<["-"], "fno-cxx-missing-return-semantics">, Group<f_Group>, Flags<[CC1Option]>;
 def fdebug_pass_arguments : Flag<["-"], "fdebug-pass-arguments">, Group<f_Group>;
 def fdebug_pass_structure : Flag<["-"], "fdebug-pass-structure">, Group<f_Group>;
 def fdiagnostics_fixit_info : Flag<["-"], "fdiagnostics-fixit-info">, Group<f_clang_Group>;
