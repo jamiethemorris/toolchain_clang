@@ -5622,11 +5622,12 @@ void freebsd::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
                                       options::OPT_fpic, options::OPT_fno_pic,
                                       options::OPT_fPIE, options::OPT_fno_PIE,
                                       options::OPT_fpie, options::OPT_fno_pie);
-    if (LastPICArg &&
-        (LastPICArg->getOption().matches(options::OPT_fPIC) ||
-         LastPICArg->getOption().matches(options::OPT_fpic) ||
-         LastPICArg->getOption().matches(options::OPT_fPIE) ||
-         LastPICArg->getOption().matches(options::OPT_fpie))) {
+    if (getToolChain().getTriple().getEnvironment() == llvm::Triple::Android ||
+        (LastPICArg &&
+         (LastPICArg->getOption().matches(options::OPT_fPIC) ||
+          LastPICArg->getOption().matches(options::OPT_fpic) ||
+          LastPICArg->getOption().matches(options::OPT_fPIE) ||
+          LastPICArg->getOption().matches(options::OPT_fpie)))) {
       CmdArgs.push_back("-KPIC");
     }
   } else if (getToolChain().getArch() == llvm::Triple::arm ||
@@ -6057,11 +6058,12 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
                                       options::OPT_fpic, options::OPT_fno_pic,
                                       options::OPT_fPIE, options::OPT_fno_PIE,
                                       options::OPT_fpie, options::OPT_fno_pie);
-    if (LastPICArg &&
-        (LastPICArg->getOption().matches(options::OPT_fPIC) ||
-         LastPICArg->getOption().matches(options::OPT_fpic) ||
-         LastPICArg->getOption().matches(options::OPT_fPIE) ||
-         LastPICArg->getOption().matches(options::OPT_fpie))) {
+    if (getToolChain().getTriple().getEnvironment() == llvm::Triple::Android ||
+        (LastPICArg &&
+         (LastPICArg->getOption().matches(options::OPT_fPIC) ||
+          LastPICArg->getOption().matches(options::OPT_fpic) ||
+          LastPICArg->getOption().matches(options::OPT_fPIE) ||
+          LastPICArg->getOption().matches(options::OPT_fpie)))) {
       CmdArgs.push_back("-KPIC");
     }
   } else if (getToolChain().getArch() == llvm::Triple::systemz) {
