@@ -2239,7 +2239,10 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
   const bool IsAndroid = Triple.getEnvironment() == llvm::Triple::Android;
   const bool IsMips = isMipsArch(Arch);
 
-  if (IsMips && !SysRoot.empty())
+  // For Android, no need to add sysroot again for mips here because sysroot
+  // is either explicitly specified or implicitly auto-detected earlier in
+  // Driver::BuildCompilation.  Multiple sysroot may also fail ld.mcld.
+  if (IsMips && !SysRoot.empty() && !IsAndroid)
     ExtraOpts.push_back("--sysroot=" + SysRoot);
 
   // Do not use 'gnu' hash style for Mips targets because .gnu.hash
