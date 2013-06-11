@@ -2901,13 +2901,22 @@ namespace {
 class X86_32TargetInfo : public X86TargetInfo {
 public:
   X86_32TargetInfo(const std::string& triple) : X86TargetInfo(triple) {
+    llvm::Triple Triple = llvm::Triple(triple);
+    const bool isAndroid = Triple.getEnvironment() == llvm::Triple::Android;
     DoubleAlign = LongLongAlign = 32;
-    LongDoubleWidth = 96;
+    LongDoubleWidth = isAndroid? 64 : 96;
     LongDoubleAlign = 32;
     SuitableAlign = 128;
-    DescriptionString = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
-                        "i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-"
-                        "a0:0:64-f80:32:32-n8:16:32-S128";
+    if (!isAndroid) {
+      DescriptionString = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
+                          "i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-"
+                          "a0:0:64-f80:32:32-n8:16:32-S128";
+    } else {
+      DescriptionString = "e-p:32:32:32-i1:8:8-i8:8:8-i16:16:16-i32:32:32-"
+                          "i64:32:64-f32:32:32-f64:32:64-v64:64:64-v128:128:128-"
+                          "a0:0:64-n8:16:32-S128";
+      LongDoubleFormat = &llvm::APFloat::IEEEdouble;
+    }
     SizeType = UnsignedInt;
     PtrDiffType = SignedInt;
     IntPtrType = SignedInt;
