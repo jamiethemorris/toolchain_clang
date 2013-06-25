@@ -78,37 +78,12 @@ bool NDKClang::isPICDefaultForced() const {
   return false;
 }
 
-Tool &NDKClang::SelectTool(const Compilation &C,
-                           const JobAction &JA,
-                           const ActionList &Inputs) const {
-  Action::ActionClass Key;
-  if (getDriver().ShouldUseClangCompiler(JA))
-    Key = Action::AnalyzeJobClass;
-  else
-    Key = JA.getKind();
+Tool *NDKClang::buildLinker() const {
+  return new tools::ndktools::Link(*this);
+}
 
-  Tool *&T = Tools[Key];
-
-  if (!T) {
-    switch (Key) {
-    default:
-      llvm_unreachable("Invalid tool kind.");
-    case Action::PreprocessJobClass:
-      T = new tools::gcc::Preprocess(*this); break;
-    case Action::AnalyzeJobClass:
-    case Action::MigrateJobClass:
-      T = new tools::Clang(*this); break;
-    case Action::PrecompileJobClass:
-    case Action::CompileJobClass:
-      T = new tools::gcc::Compile(*this); break;
-    case Action::AssembleJobClass:
-      T = new tools::ClangAs(*this); break;
-    case Action::LinkJobClass:
-      T = new tools::ndktools::Link(*this); break;
-    }
-  }
-
-  return *T;
+Tool *NDKClang::buildAssembler() const {
+  return new tools::ClangAs(*this);
 }
 
 /// Darwin - Darwin tool chain for i386 and x86_64.

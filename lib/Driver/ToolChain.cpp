@@ -71,10 +71,6 @@ Tool *ToolChain::buildAssembler() const {
 }
 
 Tool *ToolChain::buildLinker() const {
-  if (Triple.getArch() == llvm::Triple::le32 &&
-      Triple.getOS() == llvm::Triple::NDK)
-    return new tools::ndktools::Link(*this);
-
   llvm_unreachable("Linking is not supported by this toolchain");
 }
 
