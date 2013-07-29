@@ -1045,6 +1045,14 @@ void Driver::BuildActions(const ToolChain &TC, const DerivedArgList &Args,
     types::ID InputType = Inputs[i].first;
     const Arg *InputArg = Inputs[i].second;
 
+    // Let le32-none-ndk treats .bc as .o, so that we don't need to do
+    // the extra compile actions.
+    if (TC.getTriple().getArch() == llvm::Triple::le32 &&
+        TC.getTriple().getOS() == llvm::Triple::NDK) {
+      if (InputType == types::TY_LLVM_BC)
+        InputType = types::TY_Object;
+    }
+
     PL.clear();
     types::getCompilationPhases(InputType, PL);
 
