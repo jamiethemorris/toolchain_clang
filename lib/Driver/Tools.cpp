@@ -2760,6 +2760,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
     Args.AddLastArg(CmdArgs, options::OPT_trigraphs);
   }
+  if (Arg *A = Args.getLastArg(options::OPT_Qignore_c_std_not_allowed_with_cplusplus))
+    A->render(Args, CmdArgs);
 
   // GCC's behavior for -Wwrite-strings is a bit strange:
   //  * In C, this "warning flag" changes the types of string literals from
