@@ -2700,6 +2700,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
     Args.AddLastArg(CmdArgs, options::OPT_trigraphs);
   }
+  if (Arg *A = Args.getLastArg(options::OPT_Qignore_c_std_not_allowed_with_cplusplus))
+    A->render(Args, CmdArgs);
 
   // Map the bizarre '-Wwrite-strings' flag to a more sensible
   // '-fconst-strings'; this better indicates its actual behavior.

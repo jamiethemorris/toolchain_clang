@@ -1081,9 +1081,13 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       case IK_ObjCXX:
       case IK_PreprocessedCXX:
       case IK_PreprocessedObjCXX:
-        if (!Std.isCPlusPlus())
-          Diags.Report(diag::err_drv_argument_not_allowed_with)
-            << A->getAsString(Args) << "C++/ObjC++";
+        if (!Std.isCPlusPlus()) {
+          if (Args.hasArg(options::OPT_Qignore_c_std_not_allowed_with_cplusplus))
+	        LangStd = LangStandard::lang_unspecified; //FIXME: should find 2nd-to-the-last
+		  else
+            Diags.Report(diag::err_drv_argument_not_allowed_with)
+              << A->getAsString(Args) << "C++/ObjC++";
+	    }
         break;
       case IK_OpenCL:
         if (!Std.isC99())
