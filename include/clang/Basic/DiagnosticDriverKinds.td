@@ -122,9 +122,6 @@ def warn_drv_input_file_unused_by_cpp : Warning<
 def warn_drv_preprocessed_input_file_unused : Warning<
   "%0: previously preprocessed input%select{ unused when '%2' is present|}1">,
   InGroup<UnusedCommandLineArgument>;
-def warn_drv_unused_argument : Warning<
-  "argument unused during compilation: '%0'">,
-  InGroup<UnusedCommandLineArgument>;
 def warn_drv_empty_joined_argument : Warning<
   "joined argument expects additional value: '%0'">,
   InGroup<UnusedCommandLineArgument>;

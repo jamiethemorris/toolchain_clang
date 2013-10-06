@@ -1431,8 +1431,6 @@ void Driver::BuildJobs(Compilation &C) const {
           continue;
       }
 
-      Diag(clang::diag::warn_drv_unused_argument)
-        << A->getAsString(C.getArgs());
     }
   }
 }
