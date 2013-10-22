@@ -9672,6 +9672,9 @@ Sema::ResolveAddressOfOverloadedFunction(Expr *AddressOfExpr,
 /// template, where that template-id refers to a single template whose template
 /// arguments are either provided by the template-id or have defaults,
 /// as described in C++0x [temp.arg.explicit]p3.
+///
+/// If no template-ids are found, no diagnostics are emitted and NULL is
+/// returned.
 FunctionDecl *
 Sema::ResolveSingleFunctionTemplateSpecialization(OverloadExpr *ovl, 
                                                   bool Complain,
@@ -11396,7 +11399,6 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
     Method->getType()->getAs<FunctionProtoType>();
 
   unsigned NumArgsInProto = Proto->getNumArgs();
-  unsigned NumArgsToCheck = std::max<unsigned>(Args.size(), NumArgsInProto);
 
   DeclarationNameInfo OpLocInfo(
                Context.DeclarationNames.getCXXOperatorName(OO_Call), LParenLoc);
@@ -11434,8 +11436,6 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
   // slots in the call for them.
   if (Args.size() < NumArgsInProto)
     TheCall->setNumArgs(Context, NumArgsInProto + 1);
-  else if (Args.size() > NumArgsInProto)
-    NumArgsToCheck = NumArgsInProto;
 
   bool IsError = false;
 
@@ -11450,7 +11450,7 @@ Sema::BuildCallToObjectOfClassType(Scope *S, Expr *Obj,
   TheCall->setArg(0, Object.take());
 
   // Check the argument types.
-  for (unsigned i = 0; i != NumArgsToCheck; i++) {
+  for (unsigned i = 0; i != NumArgsInProto; i++) {
     Expr *Arg;
     if (i < Args.size()) {
       Arg = Args[i];

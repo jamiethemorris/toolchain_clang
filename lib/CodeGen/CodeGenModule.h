@@ -519,7 +519,9 @@ public:
  
   CodeGenVTables &getVTables() { return VTables; }
 
-  VTableContext &getVTableContext() { return VTables.getVTableContext(); }
+  ItaniumVTableContext &getVTableContext() {
+    return VTables.getVTableContext();
+  }
 
   MicrosoftVFTableContext &getVFTableContext() {
     return VTables.getVFTableContext();
@@ -1091,6 +1093,9 @@ private:
   void EmitStaticExternCAliases();
 
   void EmitDeclMetadata();
+
+  /// \brief Emit the Clang version as llvm.ident metadata.
+  void EmitVersionIdentMetadata();
 
   /// EmitCoverageFile - Emit the llvm.gcov metadata used to tell LLVM where
   /// to emit the .gcno and .gcda files in a way that persists in .bc files.

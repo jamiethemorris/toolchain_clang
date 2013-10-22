@@ -2922,13 +2922,11 @@ QualType ASTContext::getTypeDeclTypeSlow(const TypeDecl *Decl) const {
          "Template type parameter types are always available.");
 
   if (const RecordDecl *Record = dyn_cast<RecordDecl>(Decl)) {
-    assert(!Record->getPreviousDecl() &&
-           "struct/union has previous declaration");
+    assert(Record->isFirstDecl() && "struct/union has previous declaration");
     assert(!NeedsInjectedClassNameType(Record));
     return getRecordType(Record);
   } else if (const EnumDecl *Enum = dyn_cast<EnumDecl>(Decl)) {
-    assert(!Enum->getPreviousDecl() &&
-           "enum has previous declaration");
+    assert(Enum->isFirstDecl() && "enum has previous declaration");
     return getEnumType(Enum);
   } else if (const UnresolvedUsingTypenameDecl *Using =
                dyn_cast<UnresolvedUsingTypenameDecl>(Decl)) {
@@ -4417,12 +4415,27 @@ Qualifiers::ObjCLifetime ASTContext::getInnerObjCOwnership(QualType T) const {
   return Qualifiers::OCL_None;
 }
 
+static const Type *getIntegerTypeForEnum(const EnumType *ET) {
+  // Incomplete enum types are not treated as integer types.
+  // FIXME: In C++, enum types are never integer types.
+  if (ET->getDecl()->isComplete() && !ET->getDecl()->isScoped())
+    return ET->getDecl()->getIntegerType().getTypePtr();
+  return NULL;
+}
+
 /// getIntegerTypeOrder - Returns the highest ranked integer type:
 /// C99 6.3.1.8p1.  If LHS > RHS, return 1.  If LHS == RHS, return 0. If
 /// LHS < RHS, return -1.
 int ASTContext::getIntegerTypeOrder(QualType LHS, QualType RHS) const {
   const Type *LHSC = getCanonicalType(LHS).getTypePtr();
   const Type *RHSC = getCanonicalType(RHS).getTypePtr();
+
+  // Unwrap enums to their underlying type.
+  if (const EnumType *ET = dyn_cast<EnumType>(LHSC))
+    LHSC = getIntegerTypeForEnum(ET);
+  if (const EnumType *ET = dyn_cast<EnumType>(RHSC))
+    RHSC = getIntegerTypeForEnum(ET);
+
   if (LHSC == RHSC) return 0;
 
   bool LHSUnsigned = LHSC->isUnsignedIntegerType();
@@ -7463,7 +7476,7 @@ QualType ASTContext::mergeObjCGCQualifiers(QualType LHS, QualType RHS) {
 //===----------------------------------------------------------------------===//
 
 unsigned ASTContext::getIntWidth(QualType T) const {
-  if (const EnumType *ET = dyn_cast<EnumType>(T))
+  if (const EnumType *ET = T->getAs<EnumType>())
     T = ET->getDecl()->getIntegerType();
   if (T->isBooleanType())
     return 1;
