@@ -1440,12 +1440,17 @@ def falign_functions_EQ : Joined<["-"], "falign-functions=">, Group<clang_ignore
 def fglobal_ctor_const_promotion: Flag<["-"], "fglobal-ctor-const-promotion">, Group<f_Group>;
 def fno_global_ctor_const_promotion: Flag<["-"], "fno-global-ctor-const-promotion">, Group<f_Group>;
 
+// FIXME: This option should be supported and wired up to our diognostics, but
+// ignore it for now to avoid breaking builds that use it.
+def fdiagnostics_show_location_EQ : Joined<["-"], "fdiagnostics-show-location=">, Group<clang_ignored_f_Group>;
+
 defm eliminate_unused_debug_types : BooleanFFlag<"eliminate-unused-debug-types">, Group<clang_ignored_f_Group>;
 defm float_store : BooleanFFlag<"float-store">, Group<clang_ignored_f_Group>;
 defm function_attribute_list : BooleanFFlag<"function-attribute-list">, Group<clang_ignored_f_Group>;
 defm gcse : BooleanFFlag<"gcse">, Group<clang_ignored_f_Group>;
 defm gnu : BooleanFFlag<"gnu">, Group<clang_ignored_f_Group>;
 defm ident : BooleanFFlag<"ident">, Group<clang_ignored_f_Group>;
+defm implicit_templates : BooleanFFlag<"implicit-templates">, Group<clang_ignored_f_Group>;
 defm inline_limit : BooleanFFlag<"inline-limit">, Group<clang_ignored_f_Group>;
 defm ivopts : BooleanFFlag<"ivopts">, Group<clang_ignored_f_Group>;
 defm non_call_exceptions : BooleanFFlag<"non-call-exceptions">, Group<clang_ignored_f_Group>;
