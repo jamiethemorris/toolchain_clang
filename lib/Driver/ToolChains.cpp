@@ -113,7 +113,6 @@ static const char *GetArmArchForMArch(StringRef Value) {
     .Cases("armv7k", "armv7-k", "armv7k")
     .Cases("armv7m", "armv7-m", "armv7m")
     .Cases("armv7s", "armv7-s", "armv7s")
-    .Cases("armv8", "armv8a", "armv8-a", "armv8")
     .Default(0);
 }
 
@@ -2095,11 +2094,7 @@ enum Distro {
   RHEL4,
   RHEL5,
   RHEL6,
-  Fedora13,
-  Fedora14,
-  Fedora15,
-  Fedora16,
-  FedoraRawhide,
+  Fedora,
   OpenSUSE,
   UbuntuHardy,
   UbuntuIntrepid,
@@ -2117,8 +2112,7 @@ enum Distro {
 };
 
 static bool IsRedhat(enum Distro Distro) {
-  return (Distro >= Fedora13 && Distro <= FedoraRawhide) ||
-         (Distro >= RHEL4    && Distro <= RHEL6);
+  return Distro == Fedora || (Distro >= RHEL4 && Distro <= RHEL6);
 }
 
 static bool IsOpenSUSE(enum Distro Distro) {
@@ -2161,17 +2155,8 @@ static Distro DetectDistro(llvm::Triple::ArchType Arch) {
 
   if (!llvm::MemoryBuffer::getFile("/etc/redhat-release", File)) {
     StringRef Data = File.get()->getBuffer();
-    if (Data.startswith("Fedora release 16"))
-      return Fedora16;
-    else if (Data.startswith("Fedora release 15"))
-      return Fedora15;
-    else if (Data.startswith("Fedora release 14"))
-      return Fedora14;
-    else if (Data.startswith("Fedora release 13"))
-      return Fedora13;
-    else if (Data.startswith("Fedora release") &&
-             Data.find("Rawhide") != StringRef::npos)
-      return FedoraRawhide;
+    if (Data.startswith("Fedora release"))
+      return Fedora;
     else if (Data.startswith("Red Hat Enterprise Linux") &&
              Data.find("release 6") != StringRef::npos)
       return RHEL6;
@@ -2374,18 +2359,26 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
     const std::string &LibPath = GCCInstallation.getParentLibPath();
 
     // Sourcery CodeBench MIPS toolchain holds some libraries under
-    // the parent prefix of the GCC installation.
-    // FIXME: It would be cleaner to model this as a variant of multilib. IE,
-    // instead of 'lib64' it would be 'lib/el'.
+    // a biarch-like suffix of the GCC installation.
+    //
+    // FIXME: It would be cleaner to model this as a variant of bi-arch. IE,
+    // instead of a '64' biarch suffix it would be 'el' or something.
+    //
+    // FIXME: it is also deeply confusing that the suffix is called
+    // 'MultiLibSuffix' on the GCCInstallation class. It has nothing to do with
+    // multilib setups, and much more in common with a combined biarch and
+    // multiarch suffix set. (biarch for the GCC installation, multiarch for
+    // the lib directories.)
     if (IsAndroid && IsMips && isMips32r2(Args)) {
       assert(GCCInstallation.getBiarchSuffix().empty() &&
              "Unexpected bi-arch suffix");
       addPathIfExists(GCCInstallation.getInstallPath() + "/mips-r2", Paths);
-    } else
+    } else {
       addPathIfExists((GCCInstallation.getInstallPath() +
                        GCCInstallation.getMultiLibSuffix() +
                        GCCInstallation.getBiarchSuffix()),
                       Paths);
+    }
 
     // GCC cross compiling toolchains will install target libraries which ship
     // as part of the toolchain under <prefix>/<triple>/<libdir> rather than as
@@ -2405,6 +2398,9 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
     //
     // Note that this matches the GCC behavior. See the below comment for where
     // Clang diverges from GCC's behavior.
+    //
+    // FIXME: The GCCInstallation MultiLibSuffix is totally orthogonal from the
+    // Multilib directory component. It is misnamed and needs clarification.
     addPathIfExists(LibPath + "/../" + GCCTriple.str() + "/lib/../" + Multilib +
                     GCCInstallation.getMultiLibSuffix(),
                     Paths);
@@ -2430,12 +2426,11 @@ Linux::Linux(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
 
   // Try walking via the GCC triple path in case of biarch or multiarch GCC
   // installations with strange symlinks.
-  if (GCCInstallation.isValid())
+  if (GCCInstallation.isValid()) {
     addPathIfExists(SysRoot + "/usr/lib/" + GCCInstallation.getTriple().str() +
                     "/../../" + Multilib, Paths);
 
-  // Add the non-multilib suffixed paths (if potentially different).
-  if (GCCInstallation.isValid()) {
+    // Add the non-multilib suffixed paths (if potentially different).
     const std::string &LibPath = GCCInstallation.getParentLibPath();
     const llvm::Triple &GCCTriple = GCCInstallation.getTriple();
     if (!GCCInstallation.getBiarchSuffix().empty())
