@@ -120,15 +120,15 @@ public:
   const CXXRecordDecl *getThisArgumentTypeForMethod(const CXXMethodDecl *MD) {
     MD = MD->getCanonicalDecl();
     if (MD->isVirtual() && !isa<CXXDestructorDecl>(MD)) {
-      MicrosoftVFTableContext::MethodVFTableLocation ML =
-          CGM.getVFTableContext().getMethodVFTableLocation(MD);
+      MicrosoftVTableContext::MethodVFTableLocation ML =
+          CGM.getMicrosoftVTableContext().getMethodVFTableLocation(MD);
       // The vbases might be ordered differently in the final overrider object
       // and the complete object, so the "this" argument may sometimes point to
       // memory that has no particular type (e.g. past the complete object).
       // In this case, we just use a generic pointer type.
       // FIXME: might want to have a more precise type in the non-virtual
       // multiple inheritance case.
-      if (ML.VBase || !ML.VFTableOffset.isZero())
+      if (ML.VBase || !ML.VFPtrOffset.isZero())
         return 0;
     }
     return MD->getParent();
@@ -189,6 +189,12 @@ public:
   void setThunkLinkage(llvm::Function *Thunk, bool ForVTable) {
     Thunk->setLinkage(llvm::GlobalValue::WeakAnyLinkage);
   }
+
+  llvm::Value *performThisAdjustment(CodeGenFunction &CGF, llvm::Value *This,
+                                     const ThisAdjustment &TA);
+
+  llvm::Value *performReturnAdjustment(CodeGenFunction &CGF, llvm::Value *Ret,
+                                       const ReturnAdjustment &RA);
 
   void EmitGuardedInit(CodeGenFunction &CGF, const VarDecl &D,
                        llvm::GlobalVariable *DeclPtr,
@@ -267,6 +273,16 @@ private:
                                        llvm::Value *VBPtrOffset,
                                        llvm::Value *VBTableOffset,
                                        llvm::Value **VBPtr = 0);
+
+  llvm::Value *GetVBaseOffsetFromVBPtr(CodeGenFunction &CGF,
+                                       llvm::Value *Base,
+                                       int32_t VBPtrOffset,
+                                       int32_t VBTableOffset,
+                                       llvm::Value **VBPtr = 0) {
+    llvm::Value *VBPOffset = llvm::ConstantInt::get(CGM.IntTy, VBPtrOffset),
+                *VBTOffset = llvm::ConstantInt::get(CGM.IntTy, VBTableOffset);
+    return GetVBaseOffsetFromVBPtr(CGF, Base, VBPOffset, VBTOffset, VBPtr);
+  }
 
   /// \brief Performs a full virtual base adjustment.  Used to dereference
   /// pointers to members of virtual bases.
@@ -407,7 +423,9 @@ MicrosoftCXXABI::GetVirtualBaseClassOffset(CodeGenFunction &CGF,
   int64_t VBPtrChars = GetVBPtrOffsetFromBases(ClassDecl).getQuantity();
   llvm::Value *VBPtrOffset = llvm::ConstantInt::get(CGM.PtrDiffTy, VBPtrChars);
   CharUnits IntSize = getContext().getTypeSizeInChars(getContext().IntTy);
-  CharUnits VBTableChars = IntSize * GetVBTableIndex(ClassDecl, BaseClassDecl);
+  CharUnits VBTableChars =
+      IntSize *
+      CGM.getMicrosoftVTableContext().getVBTableIndex(ClassDecl, BaseClassDecl);
   llvm::Value *VBTableOffset =
     llvm::ConstantInt::get(CGM.IntTy, VBTableChars.getQuantity());
 
@@ -577,12 +595,12 @@ llvm::Value *MicrosoftCXXABI::adjustThisArgumentForVirtualCall(
     // with the base one, so look up the deleting one instead.
     LookupGD = GlobalDecl(DD, Dtor_Deleting);
   }
-  MicrosoftVFTableContext::MethodVFTableLocation ML =
-      CGM.getVFTableContext().getMethodVFTableLocation(LookupGD);
+  MicrosoftVTableContext::MethodVFTableLocation ML =
+      CGM.getMicrosoftVTableContext().getMethodVFTableLocation(LookupGD);
 
   unsigned AS = cast<llvm::PointerType>(This->getType())->getAddressSpace();
   llvm::Type *charPtrTy = CGF.Int8Ty->getPointerTo(AS);
-  CharUnits StaticOffset = ML.VFTableOffset;
+  CharUnits StaticOffset = ML.VFPtrOffset;
   if (ML.VBase) {
     bool AvoidVirtualOffset = false;
     if (isa<CXXDestructorDecl>(MD) && GD.getDtorType() == Dtor_Base) {
@@ -703,9 +721,9 @@ llvm::Value *MicrosoftCXXABI::adjustThisParameterInVirtualFunctionPrologue(
   // to the final overrider subobject before use.
   // See comments in the MicrosoftVFTableContext implementation for the details.
 
-  MicrosoftVFTableContext::MethodVFTableLocation ML =
-      CGM.getVFTableContext().getMethodVFTableLocation(LookupGD);
-  CharUnits Adjustment = ML.VFTableOffset;
+  MicrosoftVTableContext::MethodVFTableLocation ML =
+      CGM.getMicrosoftVTableContext().getMethodVFTableLocation(LookupGD);
+  CharUnits Adjustment = ML.VFPtrOffset;
   if (ML.VBase) {
     const ASTRecordLayout &DerivedLayout =
         CGF.getContext().getASTRecordLayout(MD->getParent());
@@ -785,11 +803,11 @@ void MicrosoftCXXABI::EmitConstructorCall(CodeGenFunction &CGF,
 
 void MicrosoftCXXABI::emitVTableDefinitions(CodeGenVTables &CGVT,
                                             const CXXRecordDecl *RD) {
-  MicrosoftVFTableContext &VFTContext = CGM.getVFTableContext();
-  MicrosoftVFTableContext::VFPtrListTy VFPtrs = VFTContext.getVFPtrOffsets(RD);
+  MicrosoftVTableContext &VFTContext = CGM.getMicrosoftVTableContext();
+  MicrosoftVTableContext::VFPtrListTy VFPtrs = VFTContext.getVFPtrOffsets(RD);
   llvm::GlobalVariable::LinkageTypes Linkage = CGM.getVTableLinkage(RD);
 
-  for (MicrosoftVFTableContext::VFPtrListTy::iterator I = VFPtrs.begin(),
+  for (MicrosoftVTableContext::VFPtrListTy::iterator I = VFPtrs.begin(),
        E = VFPtrs.end(); I != E; ++I) {
     llvm::GlobalVariable *VTable = getAddrOfVTable(RD, I->VFPtrFullOffset);
     if (VTable->hasInitializer())
@@ -851,9 +869,9 @@ llvm::GlobalVariable *MicrosoftCXXABI::getAddrOfVTable(const CXXRecordDecl *RD,
 
   llvm::GlobalVariable *&VTable = I->second;
 
-  MicrosoftVFTableContext &VFTContext = CGM.getVFTableContext();
-  const MicrosoftVFTableContext::VFPtrListTy &VFPtrs =
-      VFTContext.getVFPtrOffsets(RD);
+  MicrosoftVTableContext &VTContext = CGM.getMicrosoftVTableContext();
+  const MicrosoftVTableContext::VFPtrListTy &VFPtrs =
+      VTContext.getVFPtrOffsets(RD);
 
   if (DeferredVFTables.insert(RD)) {
     // We haven't processed this record type before.
@@ -879,7 +897,7 @@ llvm::GlobalVariable *MicrosoftCXXABI::getAddrOfVTable(const CXXRecordDecl *RD,
 
     llvm::ArrayType *ArrayType = llvm::ArrayType::get(
         CGM.Int8PtrTy,
-        VFTContext.getVFTableLayout(RD, VFPtrs[J].VFPtrFullOffset)
+        VTContext.getVFTableLayout(RD, VFPtrs[J].VFPtrFullOffset)
             .getNumVTableComponents());
 
     SmallString<256> Name;
@@ -904,8 +922,8 @@ llvm::Value *MicrosoftCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
   llvm::Value *VPtr = adjustThisArgumentForVirtualCall(CGF, GD, This);
   llvm::Value *VTable = CGF.GetVTablePtr(VPtr, Ty);
 
-  MicrosoftVFTableContext::MethodVFTableLocation ML =
-      CGM.getVFTableContext().getMethodVFTableLocation(GD);
+  MicrosoftVTableContext::MethodVFTableLocation ML =
+      CGM.getMicrosoftVTableContext().getMethodVFTableLocation(GD);
   llvm::Value *VFuncPtr =
       Builder.CreateConstInBoundsGEP1_64(VTable, ML.Index, "vfn");
   return Builder.CreateLoad(VFuncPtr);
@@ -960,6 +978,75 @@ void MicrosoftCXXABI::emitVirtualInheritanceTables(const CXXRecordDecl *RD) {
        I != E; ++I) {
     I->EmitVBTableDefinition(CGM, RD, Linkage);
   }
+}
+
+llvm::Value *MicrosoftCXXABI::performThisAdjustment(CodeGenFunction &CGF,
+                                                    llvm::Value *This,
+                                                    const ThisAdjustment &TA) {
+  if (TA.isEmpty())
+    return This;
+
+  llvm::Value *V = CGF.Builder.CreateBitCast(This, CGF.Int8PtrTy);
+
+  if (!TA.Virtual.isEmpty()) {
+    assert(TA.Virtual.Microsoft.VtordispOffset < 0);
+    // Adjust the this argument based on the vtordisp value.
+    llvm::Value *VtorDispPtr =
+        CGF.Builder.CreateConstGEP1_32(V, TA.Virtual.Microsoft.VtordispOffset);
+    VtorDispPtr =
+        CGF.Builder.CreateBitCast(VtorDispPtr, CGF.Int32Ty->getPointerTo());
+    llvm::Value *VtorDisp = CGF.Builder.CreateLoad(VtorDispPtr, "vtordisp");
+    V = CGF.Builder.CreateGEP(V, CGF.Builder.CreateNeg(VtorDisp));
+
+    if (TA.Virtual.Microsoft.VBPtrOffset) {
+      // If the final overrider is defined in a virtual base other than the one
+      // that holds the vfptr, we have to use a vtordispex thunk which looks up
+      // the vbtable of the derived class.
+      assert(TA.Virtual.Microsoft.VBPtrOffset > 0);
+      assert(TA.Virtual.Microsoft.VBOffsetOffset >= 0);
+      llvm::Value *VBPtr;
+      llvm::Value *VBaseOffset =
+          GetVBaseOffsetFromVBPtr(CGF, V, -TA.Virtual.Microsoft.VBPtrOffset,
+                                  TA.Virtual.Microsoft.VBOffsetOffset, &VBPtr);
+      V = CGF.Builder.CreateInBoundsGEP(VBPtr, VBaseOffset);
+    }
+  }
+
+  if (TA.NonVirtual) {
+    // Non-virtual adjustment might result in a pointer outside the allocated
+    // object, e.g. if the final overrider class is laid out after the virtual
+    // base that declares a method in the most derived class.
+    V = CGF.Builder.CreateConstGEP1_32(V, TA.NonVirtual);
+  }
+
+  // Don't need to bitcast back, the call CodeGen will handle this.
+  return V;
+}
+
+llvm::Value *
+MicrosoftCXXABI::performReturnAdjustment(CodeGenFunction &CGF, llvm::Value *Ret,
+                                         const ReturnAdjustment &RA) {
+  if (RA.isEmpty())
+    return Ret;
+
+  llvm::Value *V = CGF.Builder.CreateBitCast(Ret, CGF.Int8PtrTy);
+
+  if (RA.Virtual.Microsoft.VBIndex) {
+    assert(RA.Virtual.Microsoft.VBIndex > 0);
+    int32_t IntSize =
+        getContext().getTypeSizeInChars(getContext().IntTy).getQuantity();
+    llvm::Value *VBPtr;
+    llvm::Value *VBaseOffset =
+        GetVBaseOffsetFromVBPtr(CGF, V, RA.Virtual.Microsoft.VBPtrOffset,
+                                IntSize * RA.Virtual.Microsoft.VBIndex, &VBPtr);
+    V = CGF.Builder.CreateInBoundsGEP(VBPtr, VBaseOffset);
+  }
+
+  if (RA.NonVirtual)
+    V = CGF.Builder.CreateConstInBoundsGEP1_32(V, RA.NonVirtual);
+
+  // Cast back to the original type.
+  return CGF.Builder.CreateBitCast(V, Ret->getType());
 }
 
 bool MicrosoftCXXABI::requiresArrayCookie(const CXXDeleteExpr *expr,

@@ -202,7 +202,11 @@ unsigned ContinuationIndenter::addTokenToState(LineState &State, bool Newline,
                                                unsigned ExtraSpaces) {
   const FormatToken &Current = *State.NextToken;
 
-  if (State.Stack.size() == 0 || Current.Type == TT_ImplicitStringLiteral) {
+  if (State.Stack.size() == 0 ||
+      (Current.Type == TT_ImplicitStringLiteral &&
+       (Current.Previous->Tok.getIdentifierInfo() == NULL ||
+        Current.Previous->Tok.getIdentifierInfo()->getPPKeywordID() ==
+            tok::pp_not_keyword))) {
     // FIXME: Is this correct?
     int WhitespaceLength = SourceMgr.getSpellingColumnNumber(
                                State.NextToken->WhitespaceRange.getEnd()) -
@@ -333,7 +337,9 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
   if (Current.is(tok::l_brace) && Current.BlockKind == BK_Block) {
     State.Column = State.FirstIndent;
   } else if (Current.isOneOf(tok::r_brace, tok::r_square)) {
-    if (Current.closesBlockTypeList(Style))
+    if (Current.closesBlockTypeList(Style) ||
+        (Current.MatchingParen &&
+         Current.MatchingParen->BlockKind == BK_BracedInit))
       State.Column = State.Stack[State.Stack.size() - 2].LastSpace;
     else
       State.Column = State.FirstIndent;
@@ -387,7 +393,8 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
     State.Column = State.Stack.back().Indent;
     // Ensure that we fall back to the continuation indent width instead of just
     // flushing continuations left.
-    if (State.Column == State.FirstIndent)
+    if (State.Column == State.FirstIndent &&
+        PreviousNonComment->isNot(tok::r_brace))
       State.Column += Style.ContinuationIndentWidth;
   }
 
@@ -699,6 +706,10 @@ unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
   // update the state.
   if (Current.Type != TT_BlockComment && Current.IsMultiline)
     return addMultilineToken(Current, State);
+
+  // Don't break implicit string literals.
+  if (Current.Type == TT_ImplicitStringLiteral)
+    return 0;
 
   if (!Current.isOneOf(tok::string_literal, tok::wide_string_literal,
                        tok::utf8_string_literal, tok::utf16_string_literal,

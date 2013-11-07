@@ -1,7 +1,7 @@
 // RUN: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -emit-llvm-only %s
-// DONTRUNYET: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -fdelayed-template-parsing %s -DDELAYED_TEMPLATE_PARSING
-// DONTRUNYET: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -fms-extensions %s -DMS_EXTENSIONS
-// DONTRUNYET: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -fdelayed-template-parsing -fms-extensions %s -DMS_EXTENSIONS -DDELAYED_TEMPLATE_PARSING
+// RUN: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -fdelayed-template-parsing %s -DDELAYED_TEMPLATE_PARSING
+// RUN: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -fms-extensions %s -DMS_EXTENSIONS
+// RUN: %clang_cc1 -std=c++1y -verify -fsyntax-only -fblocks -fdelayed-template-parsing -fms-extensions %s -DMS_EXTENSIONS -DDELAYED_TEMPLATE_PARSING
 
 namespace explicit_call {
 int test() {
@@ -11,6 +11,108 @@ int test() {
   return 0;
 }  
 } //end ns
+
+namespace test_conversion_to_fptr_2 {
+
+template<class T> struct X {
+
+  T (*fp)(T) = [](auto a) { return a; };
+  
+};
+
+X<int> xi;
+
+template<class T> 
+void fooT(T t, T (*fp)(T) = [](auto a) { return a; }) {
+  fp(t);
+}
+
+int test() {
+{
+  auto L = [](auto a) { return a; };
+  int (*fp)(int) = L;
+  fp(5);
+  L(3);
+  char (*fc)(char) = L;
+  fc('b');
+  L('c');
+  double (*fd)(double) = L;
+  fd(3.14);
+  fd(6.26);
+  L(4.25);
+}
+{
+  auto L = [](auto a) ->int { return a; }; //expected-note 2{{candidate template ignored}}
+  int (*fp)(int) = L;
+  char (*fc)(char) = L; //expected-error{{no viable conversion}}
+  double (*fd)(double) = L; //expected-error{{no viable conversion}}
+}
+{
+  int x = 5;
+  auto L = [=](auto b, char c = 'x') {
+    int i = x;
+    return [](auto a) ->decltype(a) { return a; };
+  };
+  int (*fp)(int) = L(8);
+  fp(5);
+  L(3);
+  char (*fc)(char) = L('a');
+  fc('b');
+  L('c');
+  double (*fd)(double) = L(3.14);
+  fd(3.14);
+  fd(6.26);
+
+}
+{
+ auto L = [=](auto b) {
+    return [](auto a) ->decltype(b)* { return (decltype(b)*)0; };
+  };
+  int* (*fp)(int) = L(8);
+  fp(5);
+  L(3);
+  char* (*fc)(char) = L('a');
+  fc('b');
+  L('c');
+  double* (*fd)(double) = L(3.14);
+  fd(3.14);
+  fd(6.26);
+}
+{
+ auto L = [=](auto b) {
+    return [](auto a) ->decltype(b)* { return (decltype(b)*)0; }; //expected-note{{candidate template ignored}}
+  };
+  char* (*fp)(int) = L('8');
+  fp(5);
+  char* (*fc)(char) = L('a');
+  fc('b');
+  double* (*fi)(int) = L(3.14);
+  fi(5);
+  int* (*fi2)(int) = L(3.14); //expected-error{{no viable conversion}}
+}
+
+{
+ auto L = [=](auto b) {
+    return [](auto a) { 
+      return [=](auto c) { 
+        return [](auto d) ->decltype(a + b + c + d) { return d; }; 
+      }; 
+    }; 
+  };
+  int (*fp)(int) = L('8')(3)(short{});
+  double (*fs)(char) = L(3.14)(short{})('4');
+}
+
+  fooT(3);
+  fooT('a');
+  fooT(3.14);
+  fooT("abcdefg");
+  return 0;
+}
+int run2 = test();
+
+}
+
 
 namespace test_conversion_to_fptr {
 
@@ -129,15 +231,24 @@ int test() {
   M(4.15);
  }
 {
-  int i = 10; //expected-note{{declared here}}
+  int i = 10; //expected-note 3{{declared here}}
   auto L = [](auto a) {
-    return [](auto b) { //expected-note{{begins here}}
-      i = b;  //expected-error{{cannot be implicitly captured}}
+    return [](auto b) { //expected-note 3{{begins here}}
+      i = b;  //expected-error 3{{cannot be implicitly captured}}
       return b;
     };
   };
-  auto M = L(3);
+  auto M = L(3); //expected-note{{instantiation}}
   M(4.15); //expected-note{{instantiation}}
+ }
+ {
+  int i = 10; 
+  auto L = [](auto a) {
+    return [](auto b) { 
+      b = sizeof(i);  //ok 
+      return b;
+    };
+  };
  }
  {
   auto L = [](auto a) {
@@ -557,6 +668,48 @@ namespace at_ns_scope_within_class_member {
     };
     return L;
   }
+};
+X x;
+auto L = x.test();
+auto L_test = L('4');
+auto M = L('3');
+auto M_test = M('a');
+auto N = M('x');
+auto O = N("\n3 = ", 3, "\n6.14 = ", 6.14, "\n4'123'456 = ", 4'123'456);
+char (*np)(const char*, int, const char*, double, const char*, int) = O;
+auto NP_result = np("\n3 = ", 3, "\n6.14 = ", 6.14, "\n4'123'456 = ", 4'123'456);
+int (*np2)(const char*, int, const char*, double, const char*, int) = O; // expected-error{{no viable conversion}}
+  
+} //end at_ns_scope_within_class_member
+
+
+namespace at_ns_scope_within_class_template_member {
+ struct X {
+  static void foo(double d) { } 
+  template<class T = int>
+  auto test(T = T{}) {
+    auto L = [](auto a) {
+      print("a = ", a, "\n");
+      foo(a);
+      return [](decltype(a) b) {
+        foo(b);
+        foo(sizeof(a) + sizeof(b));
+        return [](auto ... c) {
+          print("c = ", c ..., "\n");
+          foo(decltype(b){});
+          foo(sizeof(decltype(a)*) + sizeof(decltype(b)*));
+          return [](decltype(c) ... d) ->decltype(a) { //expected-note{{candidate}}
+            print("d = ", d ..., "\n");
+            foo(decltype(b){});
+            foo(sizeof(decltype(a)*) + sizeof(decltype(b)*));
+            return decltype(a){};
+          };
+        };
+      };
+    };
+    return L;
+  }
+  
 };
 X x;
 auto L = x.test();

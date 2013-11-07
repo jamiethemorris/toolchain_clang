@@ -1057,6 +1057,15 @@ are listed below.
    hardware division instructions. This only applies to the ARM
    architecture.
 
+.. option:: -m[no-]crc
+
+   Enable or disable CRC instructions.
+
+   This option is used to indicate whether CRC instructions are to
+   be generated. This only applies to the ARM architecture.
+
+   CRC instructions are enabled by default on ARMv8.
+
 
 Controlling Size of Debug Information
 -------------------------------------
@@ -1290,7 +1299,12 @@ Controlling implementation limits
 .. option:: -ftemplate-depth=N
 
   Sets the limit for recursively nested template instantiations to N.  The
-  default is 1024.
+  default is 256.
+
+.. option:: -foperator-arrow-depth=N
+
+  Sets the limit for iterative calls to 'operator->' functions to N.  The
+  default is 256.
 
 .. _objc:
 

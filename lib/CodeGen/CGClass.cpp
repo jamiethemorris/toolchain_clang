@@ -22,6 +22,7 @@
 #include "clang/AST/RecordLayout.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/Basic/TargetBuiltins.h"
+#include "clang/CodeGen/CGFunctionInfo.h"
 #include "clang/Frontend/CodeGenOptions.h"
 
 using namespace clang;
@@ -2179,7 +2180,7 @@ void CodeGenFunction::EmitLambdaToBlockPointerBody(FunctionArgList &Args) {
     return;
   }
 
-  EmitFunctionBody(Args);
+  EmitFunctionBody(Args, cast<FunctionDecl>(CurGD.getDecl())->getBody());
 }
 
 void CodeGenFunction::EmitLambdaDelegatingInvokeBody(const CXXMethodDecl *MD) {

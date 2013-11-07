@@ -59,6 +59,12 @@ def OP_QDMULH_LN : Op;
 def OP_QRDMULH_LN : Op;
 def OP_FMS_LN : Op;
 def OP_FMS_LNQ : Op;
+def OP_TRN1  : Op;
+def OP_ZIP1  : Op;
+def OP_UZP1  : Op;
+def OP_TRN2  : Op;
+def OP_ZIP2  : Op;
+def OP_UZP2  : Op;
 def OP_EQ    : Op;
 def OP_GE    : Op;
 def OP_LE    : Op;
@@ -98,7 +104,9 @@ def OP_DIV  : Op;
 def OP_LONG_HI : Op;
 def OP_NARROW_HI : Op;
 def OP_MOVL_HI : Op;
-def OP_COPY : Op;
+def OP_COPY_LN : Op;
+def OP_COPYQ_LN : Op;
+def OP_COPY_LNQ : Op;
 
 class Inst <string n, string p, string t, Op o> {
   string Name = n;
@@ -106,6 +114,7 @@ class Inst <string n, string p, string t, Op o> {
   string Types = t;
   Op Operand = o;
   bit isShift = 0;
+  bit isScalarShift = 0;
   bit isVCVT_N = 0;
   bit isA64 = 0;
 
@@ -169,6 +178,7 @@ class NoTestOpInst<string n, string p, string t, Op o> : Inst<n, p, t, o> {}
 // z: scalar of half width element type, signed
 // r: scalar of double width element type, signed
 // a: scalar of element type (splat to vector type)
+// b: scalar of unsigned integer/long type (int/float args)
 // y: scalar of float
 // o: scalar of double
 // k: default elt width, double num elts
@@ -667,13 +677,18 @@ def VQDMLSL_HIGH : SOpInst<"vqdmlsl_high", "wwkk", "si", OP_QDMLSLHi>;
 ////////////////////////////////////////////////////////////////////////////////
 // Extract or insert element from vector
 def GET_LANE : IInst<"vget_lane", "sdi",
-                        "csilPcPsUcUsUiUlQcQsQiQlQUcQUsQUiQUlPcPsQPcQPs">;
+                     "csilPcPsUcUsUiUlQcQsQiQlQUcQUsQUiQUlPcPsQPcQPsfdQfQd">;
 def SET_LANE : IInst<"vset_lane", "dsdi",
-                 "csilPcPsUiUlUcUsUiUlQcQsQiQlQUcQUsQUiQUlPcPsQPcQPshfdQhQfQd">;
+                     "csilPcPsUcUsUiUlQcQsQiQlQUcQUsQUiQUlPcPsQPcQPsfdQfQd">;
 def COPY_LANE : IOpInst<"vcopy_lane", "ddidi",
-                     "csilPcPsUcUsUiUlQcQsQiQlQUcQUsQUiQUlPcPsQPcQPs", OP_COPY>;
-def COPY_LANEQ : IOpInst<"vcopy_laneq", "ggidi",
-                     "QcQsQiQlQUcQUsQUiQUlQPcQPs", OP_COPY>;
+                        "csiPcPsUcUsUiPcPsf", OP_COPY_LN>;
+def COPYQ_LANE : IOpInst<"vcopy_lane", "ddigi",
+                        "QcQsQiQlQUcQUsQUiQUlQPcQPsQfQd", OP_COPYQ_LN>;
+def COPY_LANEQ : IOpInst<"vcopy_laneq", "ddiki",
+                     "csiPcPsUcUsUif", OP_COPY_LNQ>;
+def COPYQ_LANEQ : IOpInst<"vcopy_laneq", "ddidi",
+                     "QcQsQiQlQUcQUsQUiQUlQPcQPsQfd", OP_COPY_LN>;
+
 
 ////////////////////////////////////////////////////////////////////////////////
 // Set all lanes to same value
@@ -758,6 +773,45 @@ def VMINV   : SInst<"vminv", "sd", "csiUcUsUiQcQsQiQUcQUsQUiQf">;
 def VADDV   : SInst<"vaddv", "sd", "csiUcUsUiQcQsQiQUcQUsQUi">;
 def FMAXNMV : SInst<"vmaxnmv", "sd", "Qf">;
 def FMINNMV : SInst<"vminnmv", "sd", "Qf">;
+ 
+////////////////////////////////////////////////////////////////////////////////
+// Newly added Vector Extract for f64
+def VEXT_A64 : WInst<"vext", "dddi",
+                     "cUcPcsUsPsiUilUlfdQcQUcQPcQsQUsQPsQiQUiQlQUlQfQd">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Crypto
+def AESE : SInst<"vaese", "ddd", "QUc">;
+def AESD : SInst<"vaesd", "ddd", "QUc">;
+def AESMC : SInst<"vaesmc", "dd", "QUc">;
+def AESIMC : SInst<"vaesimc", "dd", "QUc">;
+
+def SHA1H : SInst<"vsha1h", "ss", "Ui">;
+def SHA1SU1 : SInst<"vsha1su1", "ddd", "QUi">;
+def SHA256SU0 : SInst<"vsha256su0", "ddd", "QUi">;
+
+def SHA1C : SInst<"vsha1c", "ddsd", "QUi">;
+def SHA1P : SInst<"vsha1p", "ddsd", "QUi">;
+def SHA1M : SInst<"vsha1m", "ddsd", "QUi">;
+def SHA1SU0 : SInst<"vsha1su0", "dddd", "QUi">;
+def SHA256H : SInst<"vsha256h", "dddd", "QUi">;
+def SHA256H2 : SInst<"vsha256h2", "dddd", "QUi">;
+def SHA256SU1 : SInst<"vsha256su1", "dddd", "QUi">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Permutation
+def VTRN1 : SOpInst<"vtrn1", "ddd",
+                    "csiUcUsUifPcPsQcQsQiQlQUcQUsQUiQUlQfQdQPcQPs", OP_TRN1>;
+def VZIP1 : SOpInst<"vzip1", "ddd",
+                    "csiUcUsUifPcPsQcQsQiQlQUcQUsQUiQUlQfQdQPcQPs", OP_ZIP1>;
+def VUZP1 : SOpInst<"vuzp1", "ddd",
+                    "csiUcUsUifPcPsQcQsQiQlQUcQUsQUiQUlQfQdQPcQPs", OP_UZP1>;
+def VTRN2 : SOpInst<"vtrn2", "ddd",
+                    "csiUcUsUifPcPsQcQsQiQlQUcQUsQUiQUlQfQdQPcQPs", OP_TRN2>;
+def VZIP2 : SOpInst<"vzip2", "ddd",
+                    "csiUcUsUifPcPsQcQsQiQlQUcQUsQUiQUlQfQdQPcQPs", OP_ZIP2>;
+def VUZP2 : SOpInst<"vuzp2", "ddd",
+                    "csiUcUsUifPcPsQcQsQiQlQUcQUsQUiQUlQfQdQPcQPs", OP_UZP2>;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Scalar Arithmetic
@@ -782,6 +836,53 @@ def SCALAR_QSHL: SInst<"vqshl", "sss", "ScSsSiSlSUcSUsSUiSUl">;
 def SCALAR_QRSHL: SInst<"vqrshl", "sss", "ScSsSiSlSUcSUsSUiSUl">;
 // Scalar Shift Rouding Left
 def SCALAR_RSHL: SInst<"vrshl", "sss", "SlSUl">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Scalar Shift (Immediate)
+let isScalarShift = 1 in {
+// Signed/Unsigned Shift Right (Immediate)
+def SCALAR_SSHR_N: SInst<"vshr_n", "ssi", "SlSUl">;
+// Signed/Unsigned Rounding Shift Right (Immediate)
+def SCALAR_SRSHR_N: SInst<"vrshr_n", "ssi", "SlSUl">;
+
+// Signed/Unsigned Shift Right and Accumulate (Immediate)
+def SCALAR_SSRA_N: SInst<"vsra_n", "sssi", "SlSUl">;
+// Signed/Unsigned Rounding Shift Right and Accumulate (Immediate)
+def SCALAR_SRSRA_N: SInst<"vrsra_n", "sssi", "SlSUl">;
+
+// Shift Left (Immediate)
+def SCALAR_SHL_N: SInst<"vshl_n", "ssi", "SlSUl">;
+// Signed/Unsigned Saturating Shift Left (Immediate)
+def SCALAR_SQSHL_N: SInst<"vqshl_n", "ssi", "ScSsSiSlSUcSUsSUiSUl">;
+// Signed Saturating Shift Left Unsigned (Immediate)
+def SCALAR_SQSHLU_N: SInst<"vqshlu_n", "ssi", "ScSsSiSl">;
+
+// Shift Right And Insert (Immediate)
+def SCALAR_SRI_N: SInst<"vsri_n", "ssi", "SlSUl">;
+// Shift Left And Insert (Immediate)
+def SCALAR_SLI_N: SInst<"vsli_n", "ssi", "SlSUl">;
+
+// Signed/Unsigned Saturating Shift Right Narrow (Immediate)
+def SCALAR_SQSHRN_N: SInst<"vqshrn_n", "zsi", "SsSiSlSUsSUiSUl">;
+// Signed/Unsigned Saturating Rounded Shift Right Narrow (Immediate)
+def SCALAR_SQRSHRN_N: SInst<"vqrshrn_n", "zsi", "SsSiSlSUsSUiSUl">;
+// Signed Saturating Shift Right Unsigned Narrow (Immediate)
+def SCALAR_SQSHRUN_N: SInst<"vqshrun_n", "zsi", "SsSiSl">;
+// Signed Saturating Rounded Shift Right Unsigned Narrow (Immediate)
+def SCALAR_SQRSHRUN_N: SInst<"vqrshrun_n", "zsi", "SsSiSl">;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Scalar Signed/Unsigned Fixed-point Convert To Floating-Point (Immediate)
+def SCALAR_SCVTF_N_F32: SInst<"vcvt_n_f32", "ysi", "SiSUi">;
+def SCALAR_SCVTF_N_F64: SInst<"vcvt_n_f64", "osi", "SlSUl">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Scalar Floating-point Convert To Signed/Unsigned Fixed-point (Immediate)
+def SCALAR_FCVTZS_N_S32 : SInst<"vcvt_n_s32", "xsi", "Sf">;
+def SCALAR_FCVTZU_N_U32 : SInst<"vcvt_n_u32", "usi", "Sf">;
+def SCALAR_FCVTZS_N_S64 : SInst<"vcvt_n_s64", "xsi", "Sd">;
+def SCALAR_FCVTZU_N_U64 : SInst<"vcvt_n_u64", "usi", "Sd">;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Scalar Reduce Pairwise Addition (Scalar and Floating Point)
@@ -855,6 +956,29 @@ def SCALAR_CMGT : SInst<"vcgt", "sss", "Sl">;
 def SCALAR_CMGTZ : SInst<"vcgtz", "ss", "Sl">;
 def SCALAR_CMHI : SInst<"vcgt", "sss", "SUl">;
 def SCALAR_CMTST : SInst<"vtst", "sss", "SlSUl">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Scalar Floating-point Comparison
+def SCALAR_FCMEQ : IInst<"vceq", "bss", "SfSd">;
+def SCALAR_FCMEQZ : IInst<"vceqz", "bs", "SfSd">;
+def SCALAR_FCMGE : IInst<"vcge", "bss", "SfSd">;
+def SCALAR_FCMGEZ : IInst<"vcgez", "bs", "SfSd">;
+def SCALAR_FCMGT : IInst<"vcgt", "bss", "SfSd">;
+def SCALAR_FCMGTZ : IInst<"vcgtz", "bs", "SfSd">;
+def SCALAR_FCMLE : IInst<"vcle", "bss", "SfSd">;
+def SCALAR_FCMLEZ : IInst<"vclez", "bs", "SfSd">;
+def SCALAR_FCMLT : IInst<"vclt", "bss", "SfSd">;
+def SCALAR_FCMLTZ : IInst<"vcltz", "bs", "SfSd">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Scalar Floating-point Absolute Compare Mask Greater Than Or Equal
+def SCALAR_FACGE : IInst<"vcage", "bss", "SfSd">;
+def SCALAR_FACLE : IInst<"vcale", "bss", "SfSd">;
+
+////////////////////////////////////////////////////////////////////////////////
+// Scalar Floating-point Absolute Compare Mask Greater Than
+def SCALAR_FACGT : IInst<"vcagt", "bss", "SfSd">;
+def SCALAR_FACLT : IInst<"vcalt", "bss", "SfSd">;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Scalar Absolute Value

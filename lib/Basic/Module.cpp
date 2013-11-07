@@ -194,6 +194,16 @@ static void printModuleId(raw_ostream &OS, const ModuleId &Id) {
 }
 
 void Module::getExportedModules(SmallVectorImpl<Module *> &Exported) const {
+  // All non-explicit submodules are exported.
+  for (std::vector<Module *>::const_iterator I = SubModules.begin(),
+                                             E = SubModules.end();
+       I != E; ++I) {
+    Module *Mod = *I;
+    if (!Mod->IsExplicit)
+      Exported.push_back(Mod);
+  }
+
+  // Find re-exported modules by filtering the list of imported modules.
   bool AnyWildcard = false;
   bool UnrestrictedWildcard = false;
   SmallVector<Module *, 4> WildcardRestrictions;
@@ -252,15 +262,14 @@ void Module::buildVisibleModulesCache() const {
   // This module is visible to itself.
   VisibleModulesCache.insert(this);
 
-  llvm::SmallVector<Module*, 4> Exported;
-  for (unsigned I = 0, N = Imports.size(); I != N; ++I) {
-    // Every imported module is visible.
-    VisibleModulesCache.insert(Imports[I]);
+  // Every imported module is visible.
+  SmallVector<Module *, 16> Stack(Imports.begin(), Imports.end());
+  while (!Stack.empty()) {
+    Module *CurrModule = Stack.pop_back_val();
 
-    // Every module exported by an imported module is visible.
-    Imports[I]->getExportedModules(Exported);
-    VisibleModulesCache.insert(Exported.begin(), Exported.end());
-    Exported.clear();
+    // Every module transitively exported by an imported module is visible.
+    if (VisibleModulesCache.insert(CurrModule).second)
+      CurrModule->getExportedModules(Stack);
   }
 }
 

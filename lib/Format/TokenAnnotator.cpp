@@ -32,8 +32,7 @@ public:
   AnnotatingParser(const FormatStyle &Style, AnnotatedLine &Line,
                    IdentifierInfo &Ident_in)
       : Style(Style), Line(Line), CurrentToken(Line.First),
-        KeywordVirtualFound(false), NameFound(false), AutoFound(false),
-        Ident_in(Ident_in) {
+        KeywordVirtualFound(false), AutoFound(false), Ident_in(Ident_in) {
     Contexts.push_back(Context(tok::unknown, 1, /*IsExpression=*/false));
   }
 
@@ -367,7 +366,8 @@ private:
     case tok::l_paren:
       if (!parseParens())
         return false;
-      if (Line.MustBeDeclaration && NameFound && !Contexts.back().IsExpression)
+      if (Line.MustBeDeclaration && Contexts.size() == 1 &&
+          !Contexts.back().IsExpression)
         Line.MightBeFunctionDecl = true;
       break;
     case tok::l_square:
@@ -632,7 +632,6 @@ private:
       if (isStartOfName(Current) && !Line.MightBeFunctionDecl) {
         Contexts.back().FirstStartOfName = &Current;
         Current.Type = TT_StartOfName;
-        NameFound = true;
       } else if (Current.is(tok::kw_auto)) {
         AutoFound = true;
       } else if (Current.is(tok::arrow) && AutoFound &&
@@ -853,7 +852,6 @@ private:
   AnnotatedLine &Line;
   FormatToken *CurrentToken;
   bool KeywordVirtualFound;
-  bool NameFound;
   bool AutoFound;
   IdentifierInfo &Ident_in;
 };
@@ -1013,22 +1011,21 @@ private:
 
 void
 TokenAnnotator::setCommentLineLevels(SmallVectorImpl<AnnotatedLine *> &Lines) {
-  if (Lines.empty())
-    return;
-
   const AnnotatedLine *NextNonCommentLine = NULL;
-  for (unsigned i = Lines.size() - 1; i > 0; --i) {
-    if (NextNonCommentLine && Lines[i]->First->is(tok::comment) &&
-        !Lines[i]->First->Next)
-      Lines[i]->Level = NextNonCommentLine->Level;
+  for (SmallVectorImpl<AnnotatedLine *>::reverse_iterator I = Lines.rbegin(),
+                                                          E = Lines.rend();
+       I != E; ++I) {
+    if (NextNonCommentLine && (*I)->First->is(tok::comment) &&
+        (*I)->First->Next == NULL)
+      (*I)->Level = NextNonCommentLine->Level;
     else
-      NextNonCommentLine =
-          Lines[i]->First->isNot(tok::r_brace) ? Lines[i] : NULL;
+      NextNonCommentLine = (*I)->First->isNot(tok::r_brace) ? (*I) : NULL;
+
+    setCommentLineLevels((*I)->Children);
   }
 }
 
 void TokenAnnotator::annotate(AnnotatedLine &Line) {
-  setCommentLineLevels(Line.Children);
   for (SmallVectorImpl<AnnotatedLine *>::iterator I = Line.Children.begin(),
                                                   E = Line.Children.end();
        I != E; ++I) {
@@ -1059,6 +1056,7 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) {
   if (!Line.First->Next)
     return;
   FormatToken *Current = Line.First->Next;
+  bool InFunctionDecl = Line.MightBeFunctionDecl;
   while (Current != NULL) {
     if (Current->Type == TT_LineComment)
       Current->SpacesRequiredBefore = Style.SpacesBeforeTrailingComments;
@@ -1078,11 +1076,15 @@ void TokenAnnotator::calculateFormattingInformation(AnnotatedLine &Line) {
       Current->TotalLength = Current->Previous->TotalLength +
                              Current->ColumnWidth +
                              Current->SpacesRequiredBefore;
+
+    if (Current->Type == TT_CtorInitializerColon)
+      InFunctionDecl = false;
+
     // FIXME: Only calculate this if CanBreakBefore is true once static
     // initializers etc. are sorted out.
     // FIXME: Move magic numbers to a better place.
-    Current->SplitPenalty =
-        20 * Current->BindingStrength + splitPenalty(Line, *Current);
+    Current->SplitPenalty = 20 * Current->BindingStrength +
+                            splitPenalty(Line, *Current, InFunctionDecl);
 
     Current = Current->Next;
   }
@@ -1119,7 +1121,8 @@ void TokenAnnotator::calculateUnbreakableTailLengths(AnnotatedLine &Line) {
 }
 
 unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
-                                      const FormatToken &Tok) {
+                                      const FormatToken &Tok,
+                                      bool InFunctionDecl) {
   const FormatToken &Left = *Tok.Previous;
   const FormatToken &Right = Tok;
 
@@ -1135,7 +1138,7 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
       return 3;
     if (Left.Type == TT_StartOfName)
       return 20;
-    if (Line.MightBeFunctionDecl && Right.BindingStrength == 1)
+    if (InFunctionDecl && Right.BindingStrength == 1)
       // FIXME: Clean up hack of using BindingStrength to find top-level names.
       return Style.PenaltyReturnTypeOnItsOwnLine;
     return 200;
@@ -1177,7 +1180,7 @@ unsigned TokenAnnotator::splitPenalty(const AnnotatedLine &Line,
   if (Left.is(tok::colon) && Left.Type == TT_ObjCMethodExpr)
     return 20;
 
-  if (Left.is(tok::l_paren) && Line.MightBeFunctionDecl)
+  if (Left.is(tok::l_paren) && InFunctionDecl)
     return 100;
   if (Left.opensScope())
     return Left.ParameterCount > 1 ? Style.PenaltyBreakBeforeFirstCallParameter
@@ -1221,6 +1224,9 @@ bool TokenAnnotator::spaceRequiredBetween(const AnnotatedLine &Line,
             (Left.MatchingParen && Left.MatchingParen->Type == TT_CastRParen))
                ? Style.SpacesInCStyleCastParentheses
                : Style.SpacesInParentheses;
+  if (Style.SpacesInAngles &&
+      ((Left.Type == TT_TemplateOpener) != (Right.Type == TT_TemplateCloser)))
+    return true;
   if (Right.isOneOf(tok::semi, tok::comma))
     return false;
   if (Right.is(tok::less) &&
@@ -1337,7 +1343,7 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
   if (Tok.Type == TT_CtorInitializerColon || Tok.Type == TT_ObjCBlockLParen)
     return true;
   if (Tok.Previous->Tok.is(tok::kw_operator))
-    return false;
+    return Tok.is(tok::coloncolon);
   if (Tok.Type == TT_OverloadedOperatorLParen)
     return false;
   if (Tok.is(tok::colon))
@@ -1350,7 +1356,7 @@ bool TokenAnnotator::spaceRequiredBefore(const AnnotatedLine &Line,
   if (Tok.Previous->is(tok::greater) && Tok.is(tok::greater)) {
     return Tok.Type == TT_TemplateCloser &&
            Tok.Previous->Type == TT_TemplateCloser &&
-           Style.Standard != FormatStyle::LS_Cpp11;
+           (Style.Standard != FormatStyle::LS_Cpp11 || Style.SpacesInAngles);
   }
   if (Tok.isOneOf(tok::arrowstar, tok::periodstar) ||
       Tok.Previous->isOneOf(tok::arrowstar, tok::periodstar))
@@ -1447,7 +1453,8 @@ bool TokenAnnotator::canBreakBefore(const AnnotatedLine &Line,
                                   Left.Previous->Type == TT_CastRParen))
       return false;
   }
-
+  if (Right.Type == TT_ImplicitStringLiteral)
+    return false;
   if (Right.isTrailingComment())
     // We rely on MustBreakBefore being set correctly here as we should not
     // change the "binding" behavior of a comment.
