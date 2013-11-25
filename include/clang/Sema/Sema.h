@@ -960,7 +960,7 @@ public:
 
   void PushFunctionScope();
   void PushBlockScope(Scope *BlockScope, BlockDecl *Block);
-  void PushLambdaScope();
+  sema::LambdaScopeInfo *PushLambdaScope();
   
   /// \brief This is used to inform Sema what the current TemplateParameterDepth
   /// is during Parsing.  Currently it is used to pass on the depth
@@ -1599,6 +1599,10 @@ public:
   /// \param Path The module access path.
   DeclResult ActOnModuleImport(SourceLocation AtLoc, SourceLocation ImportLoc,
                                ModuleIdPath Path);
+
+  /// \brief The parser has processed a module import translated from a
+  /// #include or similar preprocessing directive.
+  void ActOnModuleInclude(SourceLocation DirectiveLoc, Module *Mod);
 
   /// \brief Create an implicit import of the given module at the given
   /// source location.
@@ -6860,6 +6864,8 @@ public:
                                   ParsedType Type,
                                   SourceLocation RParenLoc,
                                   Expr *SubExpr);
+  
+  void CheckTollFreeBridgeCast(QualType castType, Expr *castExpr);
   
   bool checkInitMethod(ObjCMethodDecl *method, QualType receiverTypeIfCall);
 

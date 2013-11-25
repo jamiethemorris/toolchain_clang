@@ -332,9 +332,11 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
   Penalty += State.NextToken->SplitPenalty;
 
   // Breaking before the first "<<" is generally not desirable if the LHS is
-  // short.
+  // short. Also always add the penalty if the LHS is split over mutliple lines
+  // to avoid unncessary line breaks that just work around this penalty.
   if (Current.is(tok::lessless) && State.Stack.back().FirstLessLess == 0 &&
-      State.Column <= Style.ColumnLimit / 2)
+      (State.Column <= Style.ColumnLimit / 2 ||
+       State.Stack.back().BreakBeforeParameter))
     Penalty += Style.PenaltyBreakFirstLessLess;
 
   if (Current.is(tok::l_brace) && Current.BlockKind == BK_Block) {
@@ -373,7 +375,8 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
               State.ParenLevel == 0 &&
               (!Style.IndentFunctionDeclarationAfterType ||
                State.Line->StartsDefinition))) {
-    State.Column = State.Stack.back().Indent;
+    State.Column =
+        std::max(State.Stack.back().LastSpace, State.Stack.back().Indent);
   } else if (Current.Type == TT_ObjCSelectorName) {
     if (State.Stack.back().ColonPos == 0) {
       State.Stack.back().ColonPos =
@@ -577,8 +580,8 @@ unsigned ContinuationIndenter::moveStateToNextToken(LineState &State,
         //
         // instead of:
         //   SomeFunction(a, [] {
-        //                        f();  // break
-        //                      });
+        //                     f();  // break
+        //                   });
         for (unsigned i = 0; i != Current.MatchingParen->FakeRParens; ++i)
           State.Stack.pop_back();
         NewIndent = State.Stack.back().LastSpace + Style.IndentWidth;
@@ -734,6 +737,7 @@ unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
 
   llvm::OwningPtr<BreakableToken> Token;
   unsigned StartColumn = State.Column - Current.ColumnWidth;
+  unsigned ColumnLimit = getColumnLimit(State);
 
   if (Current.isOneOf(tok::string_literal, tok::wide_string_literal,
                       tok::utf8_string_literal, tok::utf16_string_literal,
@@ -778,16 +782,17 @@ unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
              (Current.Previous == NULL ||
               Current.Previous->Type != TT_ImplicitStringLiteral)) {
     Token.reset(new BreakableLineComment(Current, State.Line->Level,
-                                         StartColumn, State.Line->InPPDirective,
+                                         StartColumn, /*InPPDirective=*/false,
                                          Encoding, Style));
+    // We don't insert backslashes when breaking line comments.
+    ColumnLimit = Style.ColumnLimit;
   } else {
     return 0;
   }
-  if (Current.UnbreakableTailLength >= getColumnLimit(State))
+  if (Current.UnbreakableTailLength >= ColumnLimit)
     return 0;
 
-  unsigned RemainingSpace =
-      getColumnLimit(State) - Current.UnbreakableTailLength;
+  unsigned RemainingSpace = ColumnLimit - Current.UnbreakableTailLength;
   bool BreakInserted = false;
   unsigned Penalty = 0;
   unsigned RemainingTokenColumns = 0;
@@ -800,7 +805,7 @@ unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
         Token->getLineLengthAfterSplit(LineIndex, TailOffset, StringRef::npos);
     while (RemainingTokenColumns > RemainingSpace) {
       BreakableToken::Split Split =
-          Token->getSplit(LineIndex, TailOffset, getColumnLimit(State));
+          Token->getSplit(LineIndex, TailOffset, ColumnLimit);
       if (Split.first == StringRef::npos) {
         // The last line's penalty is handled in addNextStateToQueue().
         if (LineIndex < EndIndex - 1)
@@ -811,15 +816,23 @@ unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
       assert(Split.first != 0);
       unsigned NewRemainingTokenColumns = Token->getLineLengthAfterSplit(
           LineIndex, TailOffset + Split.first + Split.second, StringRef::npos);
+
+      // We can remove extra whitespace instead of breaking the line.
+      if (RemainingTokenColumns + 1 - Split.second <= RemainingSpace) {
+        RemainingTokenColumns = 0;
+        if (!DryRun)
+          Token->replaceWhitespace(LineIndex, TailOffset, Split, Whitespaces);
+        break;
+      }
+
       assert(NewRemainingTokenColumns < RemainingTokenColumns);
       if (!DryRun)
         Token->insertBreak(LineIndex, TailOffset, Split, Whitespaces);
       Penalty += Current.SplitPenalty;
       unsigned ColumnsUsed =
           Token->getLineLengthAfterSplit(LineIndex, TailOffset, Split.first);
-      if (ColumnsUsed > getColumnLimit(State)) {
-        Penalty += Style.PenaltyExcessCharacter *
-                   (ColumnsUsed - getColumnLimit(State));
+      if (ColumnsUsed > ColumnLimit) {
+        Penalty += Style.PenaltyExcessCharacter * (ColumnsUsed - ColumnLimit);
       }
       TailOffset += Split.first + Split.second;
       RemainingTokenColumns = NewRemainingTokenColumns;

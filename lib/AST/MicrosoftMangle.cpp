@@ -135,7 +135,7 @@ private:
     mangleUnqualifiedName(ND, ND->getDeclName());
   }
   void mangleUnqualifiedName(const NamedDecl *ND, DeclarationName Name);
-  void mangleSourceName(const IdentifierInfo *II);
+  void mangleSourceName(StringRef Name);
   void mangleOperatorName(OverloadedOperatorKind OO, SourceLocation Loc);
   void mangleCXXDtorType(CXXDtorType T);
   void mangleQualifiers(Qualifiers Quals, bool IsMember);
@@ -181,6 +181,8 @@ public:
       : MicrosoftMangleContext(Context, Diags) {}
   virtual bool shouldMangleCXXName(const NamedDecl *D);
   virtual void mangleCXXName(const NamedDecl *D, raw_ostream &Out);
+  virtual void mangleVirtualMemPtrThunk(const CXXMethodDecl *MD,
+                                        int OffsetInVFTable, raw_ostream &);
   virtual void mangleThunk(const CXXMethodDecl *MD,
                            const ThunkInfo &Thunk,
                            raw_ostream &);
@@ -195,6 +197,7 @@ public:
                                 raw_ostream &Out);
   virtual void mangleCXXRTTI(QualType T, raw_ostream &);
   virtual void mangleCXXRTTIName(QualType T, raw_ostream &);
+  virtual void mangleTypeName(QualType T, raw_ostream &);
   virtual void mangleCXXCtor(const CXXConstructorDecl *D, CXXCtorType Type,
                              raw_ostream &);
   virtual void mangleCXXDtor(const CXXDestructorDecl *D, CXXDtorType Type,
@@ -507,7 +510,7 @@ MicrosoftCXXNameMangler::mangleUnqualifiedName(const NamedDecl *ND,
   switch (Name.getNameKind()) {
     case DeclarationName::Identifier: {
       if (const IdentifierInfo *II = Name.getAsIdentifierInfo()) {
-        mangleSourceName(II);
+        mangleSourceName(II->getName());
         break;
       }
       
@@ -528,19 +531,22 @@ MicrosoftCXXNameMangler::mangleUnqualifiedName(const NamedDecl *ND,
                "Typedef should not be in another decl context!");
         assert(D->getDeclName().getAsIdentifierInfo() &&
                "Typedef was not named!");
-        mangleSourceName(D->getDeclName().getAsIdentifierInfo());
+        mangleSourceName(D->getDeclName().getAsIdentifierInfo()->getName());
         break;
       }
 
-      if (TD->hasDeclaratorForAnonDecl())
+      if (TD->hasDeclaratorForAnonDecl()) {
         // Anonymous types with no tag or typedef get the name of their
         // declarator mangled in.
-        Out << "<unnamed-type-" << TD->getDeclaratorForAnonDecl()->getName()
-            << ">@";
-      else
+        llvm::SmallString<64> Name("<unnamed-type-");
+        Name += TD->getDeclaratorForAnonDecl()->getName();
+        Name += ">";
+        mangleSourceName(Name.str());
+      } else {
         // Anonymous types with no tag, no typedef, or declarator get
-        // '<unnamed-tag>@'.
-        Out << "<unnamed-tag>@";
+        // '<unnamed-tag>'.
+        mangleSourceName("<unnamed-tag>");
+      }
       break;
     }
       
@@ -784,17 +790,16 @@ void MicrosoftCXXNameMangler::mangleOperatorName(OverloadedOperatorKind OO,
   }
 }
 
-void MicrosoftCXXNameMangler::mangleSourceName(const IdentifierInfo *II) {
+void MicrosoftCXXNameMangler::mangleSourceName(StringRef Name) {
   // <source name> ::= <identifier> @
-  std::string key = II->getNameStart();
   BackRefMap::iterator Found;
   if (UseNameBackReferences)
-    Found = NameBackReferences.find(key);
+    Found = NameBackReferences.find(Name);
   if (!UseNameBackReferences || Found == NameBackReferences.end()) {
-    Out << II->getName() << '@';
+    Out << Name << '@';
     if (UseNameBackReferences && NameBackReferences.size() < 10) {
       size_t Size = NameBackReferences.size();
-      NameBackReferences[key] = Size;
+      NameBackReferences[Name] = Size;
     }
   } else {
     Out << Found->second;
@@ -1921,6 +1926,19 @@ static void mangleThunkThisAdjustment(const CXXMethodDecl *MD,
   }
 }
 
+void MicrosoftMangleContextImpl::mangleVirtualMemPtrThunk(
+    const CXXMethodDecl *MD, int OffsetInVFTable, raw_ostream &Out) {
+  bool Is64Bit = getASTContext().getTargetInfo().getPointerWidth(0) == 64;
+
+  MicrosoftCXXNameMangler Mangler(*this, Out);
+  Mangler.getStream() << "\01??_9";
+  Mangler.mangleName(MD->getParent());
+  Mangler.getStream() << "$B";
+  Mangler.mangleNumber(OffsetInVFTable);
+  Mangler.getStream() << "A";
+  Mangler.getStream() << (Is64Bit ? "A" : "E");
+}
+
 void MicrosoftMangleContextImpl::mangleThunk(const CXXMethodDecl *MD,
                                              const ThunkInfo &Thunk,
                                              raw_ostream &Out) {
@@ -2002,6 +2020,14 @@ void MicrosoftMangleContextImpl::mangleCXXRTTIName(QualType T, raw_ostream &) {
     "cannot mangle the name of type %0 into RTTI descriptors yet");
   getDiags().Report(DiagID)
     << T.getBaseTypeIdentifier();
+}
+
+void MicrosoftMangleContextImpl::mangleTypeName(QualType T, raw_ostream &Out) {
+  // This is just a made up unique string for the purposes of tbaa.  undname
+  // does *not* know how to demangle it.
+  MicrosoftCXXNameMangler Mangler(*this, Out);
+  Mangler.getStream() << '?';
+  Mangler.mangleType(T, SourceRange());
 }
 
 void MicrosoftMangleContextImpl::mangleCXXCtor(const CXXConstructorDecl *D,

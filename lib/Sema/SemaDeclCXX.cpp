@@ -880,7 +880,7 @@ static bool CheckConstexprDeclStmt(Sema &SemaRef, const FunctionDecl *Dcl,
               diag::err_constexpr_local_var_non_literal_type,
               isa<CXXConstructorDecl>(Dcl)))
           return false;
-        if (!VD->hasInit()) {
+        if (!VD->hasInit() && !VD->isCXXForRangeDecl()) {
           SemaRef.Diag(VD->getLocation(),
                        diag::err_constexpr_local_var_no_init)
             << isa<CXXConstructorDecl>(Dcl);
@@ -4913,6 +4913,10 @@ struct SpecialMemberDeletionInfo {
     // cv-qualifiers on class members don't affect default ctor / dtor calls.
     if (CSM == Sema::CXXDefaultConstructor || CSM == Sema::CXXDestructor)
       Quals = 0;
+    // cv-qualifiers on class members affect the type of both '*this' and the
+    // argument for an assignment.
+    if (IsAssignment)
+      TQ |= Quals;
     return S.LookupSpecialMember(Class, CSM,
                                  ConstArg || (Quals & Qualifiers::Const),
                                  VolatileArg || (Quals & Qualifiers::Volatile),
@@ -12793,11 +12797,9 @@ MSPropertyDecl *Sema::HandleMSProperty(Scope *S, RecordDecl *Record,
     PrevDecl = 0;
 
   SourceLocation TSSL = D.getLocStart();
-  MSPropertyDecl *NewPD;
   const AttributeList::PropertyData &Data = MSPropertyAttr->getPropertyData();
-  NewPD = new (Context) MSPropertyDecl(Record, Loc,
-                                       II, T, TInfo, TSSL,
-                                       Data.GetterId, Data.SetterId);
+  MSPropertyDecl *NewPD = MSPropertyDecl::Create(
+      Context, Record, Loc, II, T, TInfo, TSSL, Data.GetterId, Data.SetterId);
   ProcessDeclAttributes(TUScope, NewPD, D);
   NewPD->setAccess(AS);
 

@@ -329,8 +329,17 @@ void DarwinClang::AddLinkRuntimeLibArgs(const ArgList &Args,
         // The ASAN runtime library requires C++.
         AddCXXStdlibLibArgs(Args, CmdArgs);
       }
-      AddLinkRuntimeLib(Args, CmdArgs,
-                        "libclang_rt.asan_osx_dynamic.dylib", true);
+      if (isTargetMacOS()) {
+        AddLinkRuntimeLib(Args, CmdArgs,
+                          "libclang_rt.asan_osx_dynamic.dylib",
+                          true);
+      } else {
+        if (isTargetIOSSimulator()) {
+          AddLinkRuntimeLib(Args, CmdArgs,
+                            "libclang_rt.asan_iossim_dynamic.dylib",
+                            true);
+        }
+      }
     }
   }
 
@@ -784,6 +793,10 @@ DerivedArgList *Darwin::TranslateArgs(const DerivedArgList &Args,
 
     else if (Name == "x86_64")
       DAL->AddFlagArg(0, Opts.getOption(options::OPT_m64));
+    else if (Name == "x86_64h") {
+      DAL->AddFlagArg(0, Opts.getOption(options::OPT_m64));
+      DAL->AddJoinedArg(0, MArch, "x86_64h");
+    }
 
     else if (Name == "arm")
       DAL->AddJoinedArg(0, MArch, "armv4t");
@@ -906,12 +919,6 @@ void Darwin::CheckObjCARC() const {
   if (isTargetIPhoneOS() || !isMacosxVersionLT(10, 6))
     return;
   getDriver().Diag(diag::err_arc_unsupported_on_toolchain);
-}
-
-std::string
-Darwin_Generic_GCC::ComputeEffectiveClangTriple(const ArgList &Args,
-                                                types::ID InputType) const {
-  return ComputeLLVMTriple(Args, InputType);
 }
 
 /// Generic_GCC - A tool chain using the 'gcc' command to perform
@@ -1336,6 +1343,11 @@ static bool isMicroMips(const ArgList &Args) {
   return A && A->getOption().matches(options::OPT_mmicromips);
 }
 
+static bool isMipsFP64(const ArgList &Args) {
+  Arg *A = Args.getLastArg(options::OPT_mfp64, options::OPT_mfp32);
+  return A && A->getOption().matches(options::OPT_mfp64);
+}
+
 static bool isMipsNan2008(const ArgList &Args) {
   Arg *A = Args.getLastArg(options::OPT_mnan_EQ);
   return A && A->getValue() == StringRef("2008");
@@ -1449,8 +1461,13 @@ void Generic_GCC::GCCInstallationDetector::findMIPSABIDirSuffix(
 
     if (isSoftFloatABI(Args))
       Suffix += "/sof";
-    else if (isMipsNan2008(Args))
-      Suffix += "/nan2008";
+    else {
+      if (isMipsFP64(Args))
+        Suffix += "/fp64";
+
+      if (isMipsNan2008(Args))
+        Suffix += "/nan2008";
+    }
   }
 
   if (!hasCrtBeginObj(Path + Suffix))
@@ -1557,10 +1574,6 @@ Tool *Generic_GCC::getTool(Action::ActionClass AC) const {
     if (!Preprocess)
       Preprocess.reset(new tools::gcc::Preprocess(*this));
     return Preprocess.get();
-  case Action::PrecompileJobClass:
-    if (!Precompile)
-      Precompile.reset(new tools::gcc::Precompile(*this));
-    return Precompile.get();
   case Action::CompileJobClass:
     if (!Compile)
       Compile.reset(new tools::gcc::Compile(*this));
@@ -1571,7 +1584,7 @@ Tool *Generic_GCC::getTool(Action::ActionClass AC) const {
 }
 
 Tool *Generic_GCC::buildAssembler() const {
-  return new tools::gcc::Assemble(*this);
+  return new tools::gnutools::Assemble(*this);
 }
 
 Tool *Generic_GCC::buildLinker() const {
