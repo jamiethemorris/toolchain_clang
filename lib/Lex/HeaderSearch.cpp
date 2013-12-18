@@ -48,7 +48,7 @@ HeaderSearch::HeaderSearch(IntrusiveRefCntPtr<HeaderSearchOptions> HSOpts,
                            const LangOptions &LangOpts, 
                            const TargetInfo *Target)
   : HSOpts(HSOpts), FileMgr(SourceMgr.getFileManager()), FrameworkMap(64),
-    ModMap(SourceMgr, *Diags.getClient(), LangOpts, Target, *this)
+    ModMap(SourceMgr, Diags, LangOpts, Target, *this)
 {
   AngledDirIdx = 0;
   SystemDirIdx = 0;
@@ -59,6 +59,8 @@ HeaderSearch::HeaderSearch(IntrusiveRefCntPtr<HeaderSearchOptions> HSOpts,
   NumIncluded = 0;
   NumMultiIncludeFileOptzn = 0;
   NumFrameworkLookups = NumSubFrameworkLookups = 0;
+
+  EnabledModules = LangOpts.Modules;
 }
 
 HeaderSearch::~HeaderSearch() {
@@ -953,6 +955,9 @@ StringRef HeaderSearch::getUniqueFrameworkName(StringRef Framework) {
 bool HeaderSearch::hasModuleMap(StringRef FileName, 
                                 const DirectoryEntry *Root,
                                 bool IsSystem) {
+  if (!enabledModules())
+    return false;
+
   SmallVector<const DirectoryEntry *, 2> FixUpDirectories;
   
   StringRef DirName = FileName;

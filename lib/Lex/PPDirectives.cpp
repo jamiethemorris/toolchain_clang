@@ -404,35 +404,33 @@ void Preprocessor::SkipExcludedConditionalBlock(SourceLocation IfTokenLoc,
       } else if (Sub == "lif") {  // "elif".
         PPConditionalInfo &CondInfo = CurPPLexer->peekConditionalLevel();
 
-        bool ShouldEnter;
-        const SourceLocation ConditionalBegin = CurPPLexer->getSourceLocation();
+        // If this is a #elif with a #else before it, report the error.
+        if (CondInfo.FoundElse) Diag(Tok, diag::pp_err_elif_after_else);
+
         // If this is in a skipping block or if we're already handled this #if
         // block, don't bother parsing the condition.
         if (CondInfo.WasSkipping || CondInfo.FoundNonSkip) {
           DiscardUntilEndOfDirective();
-          ShouldEnter = false;
         } else {
+          const SourceLocation CondBegin = CurPPLexer->getSourceLocation();
           // Restore the value of LexingRawMode so that identifiers are
           // looked up, etc, inside the #elif expression.
           assert(CurPPLexer->LexingRawMode && "We have to be skipping here!");
           CurPPLexer->LexingRawMode = false;
           IdentifierInfo *IfNDefMacro = 0;
-          ShouldEnter = EvaluateDirectiveExpression(IfNDefMacro);
+          const bool CondValue = EvaluateDirectiveExpression(IfNDefMacro);
           CurPPLexer->LexingRawMode = true;
-        }
-        const SourceLocation ConditionalEnd = CurPPLexer->getSourceLocation();
-
-        // If this is a #elif with a #else before it, report the error.
-        if (CondInfo.FoundElse) Diag(Tok, diag::pp_err_elif_after_else);
-
-        // If this condition is true, enter it!
-        if (ShouldEnter) {
-          CondInfo.FoundNonSkip = true;
-          if (Callbacks)
+          if (Callbacks) {
+            const SourceLocation CondEnd = CurPPLexer->getSourceLocation();
             Callbacks->Elif(Tok.getLocation(),
-                            SourceRange(ConditionalBegin, ConditionalEnd),
-                            ShouldEnter, CondInfo.IfLoc);
-          break;
+                            SourceRange(CondBegin, CondEnd),
+                            (CondValue ? PPCallbacks::CVK_True : PPCallbacks::CVK_False), CondInfo.IfLoc);
+          }
+          // If this condition is true, enter it!
+          if (CondValue) {
+            CondInfo.FoundNonSkip = true;
+            break;
+          }
         }
       }
     }
@@ -540,7 +538,8 @@ Module *Preprocessor::getModuleForLocation(SourceLocation FilenameLoc) {
     return HeaderInfo.getModuleMap().SourceModule; // Compiling a source.
   }
   // Try to determine the module of the include directive.
-  FileID IDOfIncl = SourceMgr.getFileID(FilenameLoc);
+  // FIXME: Look into directly passing the FileEntry from LookupFile instead.
+  FileID IDOfIncl = SourceMgr.getFileID(SourceMgr.getSpellingLoc(FilenameLoc));
   if (const FileEntry *EntryOfIncl = SourceMgr.getFileEntryForID(IDOfIncl)) {
     // The include comes from a file.
     return ModMap.findModuleForHeader(EntryOfIncl).getModule();
@@ -589,9 +588,13 @@ void Preprocessor::verifyModuleInclude(SourceLocation FilenameLoc,
   Module *RequestingModule = getModuleForLocation(FilenameLoc);
   if (RequestingModule)
     HeaderInfo.getModuleMap().resolveUses(RequestingModule, /*Complain=*/false);
+  bool FoundInModule = false;
   ModuleMap::KnownHeader RequestedModule =
-      HeaderInfo.getModuleMap().findModuleForHeader(IncFileEnt,
-                                                    RequestingModule);
+      HeaderInfo.getModuleMap().findModuleForHeader(
+          IncFileEnt, RequestingModule, &FoundInModule);
+
+  if (!FoundInModule)
+    return; // The header is not part of a module.
 
   if (RequestingModule == RequestedModule.getModule())
     return; // No faults wihin a module, or between files both not in modules.
@@ -611,7 +614,7 @@ void Preprocessor::verifyModuleInclude(SourceLocation FilenameLoc,
   if (RequestingModule && getLangOpts().ModulesDeclUse &&
       violatesUseDeclarations(RequestingModule, RequestedModule.getModule()))
     Diag(FilenameLoc, diag::error_undeclared_use_of_module)
-        << Filename;
+        << RequestingModule->getFullModuleName() << Filename;
 }
 
 const FileEntry *Preprocessor::LookupFile(
@@ -1327,21 +1330,20 @@ bool Preprocessor::GetIncludeFilenameSpelling(SourceLocation Loc,
   return isAngled;
 }
 
-/// \brief Handle cases where the \#include name is expanded from a macro
-/// as multiple tokens, which need to be glued together.
-///
-/// This occurs for code like:
-/// \code
-///    \#define FOO <a/b.h>
-///    \#include FOO
-/// \endcode
-/// because in this case, "<a/b.h>" is returned as 7 tokens, not one.
-///
-/// This code concatenates and consumes tokens up to the '>' token.  It returns
-/// false if the > was found, otherwise it returns true if it finds and consumes
-/// the EOD marker.
-bool Preprocessor::ConcatenateIncludeName(
-                                        SmallString<128> &FilenameBuffer,
+// \brief Handle cases where the \#include name is expanded from a macro
+// as multiple tokens, which need to be glued together.
+//
+// This occurs for code like:
+// \code
+//    \#define FOO <a/b.h>
+//    \#include FOO
+// \endcode
+// because in this case, "<a/b.h>" is returned as 7 tokens, not one.
+//
+// This code concatenates and consumes tokens up to the '>' token.  It returns
+// false if the > was found, otherwise it returns true if it finds and consumes
+// the EOD marker.
+bool Preprocessor::ConcatenateIncludeName(SmallString<128> &FilenameBuffer,
                                           SourceLocation &End) {
   Token CurTok;
 
@@ -2282,7 +2284,7 @@ void Preprocessor::HandleIfDirective(Token &IfToken,
   if (Callbacks)
     Callbacks->If(IfToken.getLocation(),
                   SourceRange(ConditionalBegin, ConditionalEnd),
-                  ConditionalTrue);
+                  (ConditionalTrue ? PPCallbacks::CVK_True : PPCallbacks::CVK_False));
 
   // Should we include the stuff contained by this directive?
   if (ConditionalTrue) {
@@ -2379,7 +2381,7 @@ void Preprocessor::HandleElifDirective(Token &ElifToken) {
   if (Callbacks)
     Callbacks->Elif(ElifToken.getLocation(),
                     SourceRange(ConditionalBegin, ConditionalEnd),
-                    true, CI.IfLoc);
+                    PPCallbacks::CVK_NotEvaluated, CI.IfLoc);
 
   // Finally, skip the rest of the contents of this block.
   SkipExcludedConditionalBlock(CI.IfLoc, /*Foundnonskip*/true,

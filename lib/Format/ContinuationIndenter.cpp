@@ -136,7 +136,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
   if (Style.AlwaysBreakBeforeMultilineStrings &&
       State.Column > State.Stack.back().Indent && // Breaking saves columns.
       !Previous.isOneOf(tok::kw_return, tok::lessless, tok::at) &&
-      Previous.Type != TT_InlineASMColon && NextIsMultilineString(State))
+      Previous.Type != TT_InlineASMColon && nextIsMultilineString(State))
     return true;
   if (((Previous.Type == TT_DictLiteral && Previous.is(tok::l_brace)) ||
        Previous.Type == TT_ArrayInitializerLSquare) &&
@@ -183,9 +183,12 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
       Current.LongestObjCSelectorName == 0 &&
       State.Stack.back().BreakBeforeParameter)
     return true;
-  if ((Current.Type == TT_CtorInitializerColon ||
-       (Previous.ClosesTemplateDeclaration && State.ParenLevel == 0 &&
-        !Current.isTrailingComment())))
+  if (Current.Type == TT_CtorInitializerColon &&
+      (!Style.AllowShortFunctionsOnASingleLine ||
+       Style.BreakConstructorInitializersBeforeComma || Style.ColumnLimit != 0))
+    return true;
+  if (Previous.ClosesTemplateDeclaration && State.ParenLevel == 0 &&
+      !Current.isTrailingComment())
     return true;
 
   if ((Current.Type == TT_StartOfName || Current.is(tok::kw_operator)) &&
@@ -340,7 +343,8 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
     Penalty += Style.PenaltyBreakFirstLessLess;
 
   if (Current.is(tok::l_brace) && Current.BlockKind == BK_Block) {
-    State.Column = State.FirstIndent;
+    State.Column =
+        State.ParenLevel == 0 ? State.FirstIndent : State.Stack.back().Indent;
   } else if (Current.isOneOf(tok::r_brace, tok::r_square)) {
     if (Current.closesBlockTypeList(Style) ||
         (Current.MatchingParen &&
@@ -542,6 +546,7 @@ unsigned ContinuationIndenter::moveStateToNextToken(LineState &State,
     //       ParameterToInnerFunction));
     if (*I > prec::Unknown)
       NewParenState.LastSpace = std::max(NewParenState.LastSpace, State.Column);
+    NewParenState.StartOfFunctionCall = State.Column;
 
     // Always indent conditional expressions. Never indent expression where
     // the 'operator' is ',', ';' or an assignment (i.e. *I <=
@@ -569,7 +574,7 @@ unsigned ContinuationIndenter::moveStateToNextToken(LineState &State,
       if (Current.MatchingParen && Current.BlockKind == BK_Block) {
         // If this is an l_brace starting a nested block, we pretend (wrt. to
         // indentation) that we already consumed the corresponding r_brace.
-        // Thus, we remove all ParenStates caused bake fake parentheses that end
+        // Thus, we remove all ParenStates caused by fake parentheses that end
         // at the r_brace. The net effect of this is that we don't indent
         // relative to the l_brace, if the nested block is the last parameter of
         // a function. For example, this formats:
@@ -864,12 +869,13 @@ unsigned ContinuationIndenter::getColumnLimit(const LineState &State) const {
   return Style.ColumnLimit - (State.Line->InPPDirective ? 2 : 0);
 }
 
-bool ContinuationIndenter::NextIsMultilineString(const LineState &State) {
+bool ContinuationIndenter::nextIsMultilineString(const LineState &State) {
   const FormatToken &Current = *State.NextToken;
   if (!Current.is(tok::string_literal))
     return false;
   // We never consider raw string literals "multiline" for the purpose of
-  // AlwaysBreakBeforeMultilineStrings implementation.
+  // AlwaysBreakBeforeMultilineStrings implementation as they are special-cased
+  // (see TokenAnnotator::mustBreakBefore().
   if (Current.TokenText.startswith("R\""))
     return false;
   if (Current.IsMultiline)

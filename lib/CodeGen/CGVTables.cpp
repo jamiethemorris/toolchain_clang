@@ -54,7 +54,8 @@ llvm::Constant *CodeGenModule::GetAddrOfThunk(GlobalDecl GD,
   Out.flush();
 
   llvm::Type *Ty = getTypes().GetFunctionTypeForVTable(GD);
-  return GetOrCreateLLVMFunction(Name, Ty, GD, /*ForVTable=*/true);
+  return GetOrCreateLLVMFunction(Name, Ty, GD, /*ForVTable=*/true,
+                                 /*DontDefer*/ true);
 }
 
 static void setThunkVisibility(CodeGenModule &CGM, const CXXMethodDecl *MD,
@@ -252,13 +253,16 @@ void CodeGenFunction::StartThunk(llvm::Function *Fn, GlobalDecl GD,
   FunctionArgList FunctionArgs;
 
   // Create the implicit 'this' parameter declaration.
-  CGM.getCXXABI().BuildInstanceFunctionParams(*this, ResultType, FunctionArgs);
+  CGM.getCXXABI().buildThisParam(*this, FunctionArgs);
 
   // Add the rest of the parameters.
   for (FunctionDecl::param_const_iterator I = MD->param_begin(),
                                           E = MD->param_end();
        I != E; ++I)
     FunctionArgs.push_back(*I);
+
+  if (isa<CXXDestructorDecl>(MD))
+    CGM.getCXXABI().addImplicitStructorParams(*this, ResultType, FunctionArgs);
 
   // Start defining the function.
   StartFunction(GlobalDecl(), ResultType, Fn, FnInfo, FunctionArgs,
@@ -422,14 +426,15 @@ void CodeGenVTables::emitThunk(GlobalDecl GD, const ThunkInfo &Thunk,
     // expensive/sucky at the moment, so don't generate the thunk unless
     // we have to.
     // FIXME: Do something better here; GenerateVarArgsThunk is extremely ugly.
-    if (!UseAvailableExternallyLinkage)
+    if (!UseAvailableExternallyLinkage) {
       CodeGenFunction(CGM).GenerateVarArgsThunk(ThunkFn, FnInfo, GD, Thunk);
+      CGM.getCXXABI().setThunkLinkage(ThunkFn, ForVTable);
+    }
   } else {
     // Normal thunk body generation.
     CodeGenFunction(CGM).GenerateThunk(ThunkFn, FnInfo, GD, Thunk);
+    CGM.getCXXABI().setThunkLinkage(ThunkFn, ForVTable);
   }
-
-  CGM.getCXXABI().setThunkLinkage(ThunkFn, ForVTable);
 }
 
 void CodeGenVTables::maybeEmitThunkForVTable(GlobalDecl GD,
@@ -751,7 +756,7 @@ CodeGenVTables::GenerateClassData(const CXXRecordDecl *RD) {
 /// strongly elsewhere.  Otherwise, we'd just like to avoid emitting
 /// v-tables when unnecessary.
 bool CodeGenVTables::isVTableExternal(const CXXRecordDecl *RD) {
-  assert(RD->isDynamicClass() && "Non dynamic classes have no VTable.");
+  assert(RD->isDynamicClass() && "Non-dynamic classes have no VTable.");
 
   // If we have an explicit instantiation declaration (and not a
   // definition), the v-table is defined elsewhere.

@@ -38,7 +38,7 @@ class ModuleMapParser;
   
 class ModuleMap {
   SourceManager &SourceMgr;
-  IntrusiveRefCntPtr<DiagnosticsEngine> Diags;
+  DiagnosticsEngine &Diags;
   const LangOptions &LangOpts;
   const TargetInfo *Target;
   HeaderSearch &HeaderInfo;
@@ -182,13 +182,12 @@ public:
   /// This source manager should be shared with the header-search mechanism,
   /// since they will refer to the same headers.
   ///
-  /// \param DC A diagnostic consumer that will be cloned for use in generating
-  /// diagnostics.
+  /// \param Diags A diagnostic engine used for diagnostics.
   ///
   /// \param LangOpts Language options for this translation unit.
   ///
   /// \param Target The target for this translation unit.
-  ModuleMap(SourceManager &SourceMgr, DiagnosticConsumer &DC,
+  ModuleMap(SourceManager &SourceMgr, DiagnosticsEngine &Diags,
             const LangOptions &LangOpts, const TargetInfo *Target,
             HeaderSearch &HeaderInfo);
 
@@ -213,11 +212,15 @@ public:
   /// used from.  Used to disambiguate if a header is present in multiple
   /// modules.
   ///
+  /// \param FoundInModule If not null will be set to \c true if the header was
+  /// found in non-exclude header declaration of a module.
+  ///
   /// \returns The module KnownHeader, which provides the module that owns the
   /// given header file.  The KnownHeader is default constructed to indicate
   /// that no module owns this header file.
   KnownHeader findModuleForHeader(const FileEntry *File,
-                                  Module *RequestingModule = NULL);
+                                  Module *RequestingModule = NULL,
+                                  bool *FoundInModule = NULL);
 
   /// \brief Determine whether the given header is part of a module
   /// marked 'unavailable'.

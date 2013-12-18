@@ -59,7 +59,7 @@ Module *ModuleMap::resolveModuleId(const ModuleId &Id, Module *Mod,
   Module *Context = lookupModuleUnqualified(Id[0].first, Mod);
   if (!Context) {
     if (Complain)
-      Diags->Report(Id[0].second, diag::err_mmap_missing_module_unqualified)
+      Diags.Report(Id[0].second, diag::err_mmap_missing_module_unqualified)
       << Id[0].first << Mod->getFullModuleName();
 
     return 0;
@@ -70,7 +70,7 @@ Module *ModuleMap::resolveModuleId(const ModuleId &Id, Module *Mod,
     Module *Sub = lookupModuleQualified(Id[I].first, Context);
     if (!Sub) {
       if (Complain)
-        Diags->Report(Id[I].second, diag::err_mmap_missing_module_qualified)
+        Diags.Report(Id[I].second, diag::err_mmap_missing_module_qualified)
         << Id[I].first << Context->getFullModuleName()
         << SourceRange(Id[0].second, Id[I-1].second);
 
@@ -83,19 +83,12 @@ Module *ModuleMap::resolveModuleId(const ModuleId &Id, Module *Mod,
   return Context;
 }
 
-ModuleMap::ModuleMap(SourceManager &SourceMgr, DiagnosticConsumer &DC,
+ModuleMap::ModuleMap(SourceManager &SourceMgr, DiagnosticsEngine &Diags,
                      const LangOptions &LangOpts, const TargetInfo *Target,
                      HeaderSearch &HeaderInfo)
-    : SourceMgr(SourceMgr), LangOpts(LangOpts), Target(Target),
+    : SourceMgr(SourceMgr), Diags(Diags), LangOpts(LangOpts), Target(Target),
       HeaderInfo(HeaderInfo), BuiltinIncludeDir(0), CompilingModule(0),
-      SourceModule(0) {
-  IntrusiveRefCntPtr<DiagnosticIDs> DiagIDs(new DiagnosticIDs);
-  Diags = IntrusiveRefCntPtr<DiagnosticsEngine>(
-            new DiagnosticsEngine(DiagIDs, new DiagnosticOptions));
-  Diags->setClient(new ForwardingDiagnosticConsumer(DC),
-                   /*ShouldOwnClient=*/true);
-  Diags->setSourceManager(&SourceMgr);
-}
+      SourceModule(0) {}
 
 ModuleMap::~ModuleMap() {
   for (llvm::StringMap<Module *>::iterator I = Modules.begin(), 
@@ -168,8 +161,19 @@ static bool isBuiltinHeader(StringRef FileName) {
 
 ModuleMap::KnownHeader
 ModuleMap::findModuleForHeader(const FileEntry *File,
-                               Module *RequestingModule) {
+                               Module *RequestingModule,
+                               bool *FoundInModule) {
   HeadersMap::iterator Known = Headers.find(File);
+
+  // If we've found a builtin header within Clang's builtin include directory,
+  // load all of the module maps to see if it will get associated with a
+  // specific module (e.g., in /usr/include).
+  if (Known == Headers.end() && File->getDir() == BuiltinIncludeDir &&
+      isBuiltinHeader(llvm::sys::path::filename(File->getName()))) {
+    HeaderInfo.loadTopLevelSystemModules();
+    Known = Headers.find(File);
+  }
+
   if (Known != Headers.end()) {
     ModuleMap::KnownHeader Result = KnownHeader();
 
@@ -177,9 +181,15 @@ ModuleMap::findModuleForHeader(const FileEntry *File,
     for (SmallVectorImpl<KnownHeader>::iterator I = Known->second.begin(),
                                                 E = Known->second.end();
          I != E; ++I) {
-      // Cannot use a module if the header is excluded or unavailable in it.
-      if (I->getRole() == ModuleMap::ExcludedHeader ||
-          !I->getModule()->isAvailable())
+      // Cannot use a module if the header is excluded in it.
+      if (I->getRole() == ModuleMap::ExcludedHeader)
+        continue;
+
+      if (FoundInModule)
+        *FoundInModule = true;
+
+      // Cannot use a module if it is unavailable.
+      if (!I->getModule()->isAvailable())
         continue;
 
       // If 'File' is part of 'RequestingModule', 'RequestingModule' is the
@@ -194,6 +204,7 @@ ModuleMap::findModuleForHeader(const FileEntry *File,
                     RequestingModule->DirectUses.end(),
                     I->getModule()) == RequestingModule->DirectUses.end())
         continue;
+
       Result = *I;
       // If 'File' is a public header of this module, this is as good as we
       // are going to get.
@@ -203,18 +214,6 @@ ModuleMap::findModuleForHeader(const FileEntry *File,
     return Result;
   }
 
-  // If we've found a builtin header within Clang's builtin include directory,
-  // load all of the module maps to see if it will get associated with a
-  // specific module (e.g., in /usr/include).
-  if (File->getDir() == BuiltinIncludeDir &&
-      isBuiltinHeader(llvm::sys::path::filename(File->getName()))) {
-    HeaderInfo.loadTopLevelSystemModules();
-
-    // Check again.
-    if (Headers.find(File) != Headers.end())
-      return findModuleForHeader(File, RequestingModule);
-  }
-  
   const DirectoryEntry *Dir = File->getDir();
   SmallVector<const DirectoryEntry *, 2> SkippedDirs;
 
@@ -1066,7 +1065,7 @@ void ModuleMapParser::skipUntil(MMToken::TokenKind K) {
 bool ModuleMapParser::parseModuleId(ModuleId &Id) {
   Id.clear();
   do {
-    if (Tok.is(MMToken::Identifier)) {
+    if (Tok.is(MMToken::Identifier) || Tok.is(MMToken::StringLiteral)) {
       Id.push_back(std::make_pair(Tok.getString(), Tok.getLocation()));
       consumeToken();
     } else {
@@ -1474,12 +1473,13 @@ void ModuleMapParser::parseHeaderDecl(MMToken::TokenKind LeadingToken,
     HadError = true;
     return;
   }
-  std::string FileName = Tok.getString();
-  SourceLocation FileNameLoc = consumeToken();
+  Module::HeaderDirective Header;
+  Header.FileName = Tok.getString();
+  Header.FileNameLoc = consumeToken();
   
   // Check whether we already have an umbrella.
   if (LeadingToken == MMToken::UmbrellaKeyword && ActiveModule->Umbrella) {
-    Diags.Report(FileNameLoc, diag::err_mmap_umbrella_clash)
+    Diags.Report(Header.FileNameLoc, diag::err_mmap_umbrella_clash)
       << ActiveModule->getFullModuleName();
     HadError = true;
     return;
@@ -1489,12 +1489,12 @@ void ModuleMapParser::parseHeaderDecl(MMToken::TokenKind LeadingToken,
   const FileEntry *File = 0;
   const FileEntry *BuiltinFile = 0;
   SmallString<128> PathName;
-  if (llvm::sys::path::is_absolute(FileName)) {
-    PathName = FileName;
+  if (llvm::sys::path::is_absolute(Header.FileName)) {
+    PathName = Header.FileName;
     File = SourceMgr.getFileManager().getFile(PathName);
   } else if (const DirectoryEntry *Dir = getOverriddenHeaderSearchDir()) {
     PathName = Dir->getName();
-    llvm::sys::path::append(PathName, FileName);
+    llvm::sys::path::append(PathName, Header.FileName);
     File = SourceMgr.getFileManager().getFile(PathName);
   } else {
     // Search for the header file within the search directory.
@@ -1505,18 +1505,18 @@ void ModuleMapParser::parseHeaderDecl(MMToken::TokenKind LeadingToken,
       appendSubframeworkPaths(ActiveModule, PathName);
       
       // Check whether this file is in the public headers.
-      llvm::sys::path::append(PathName, "Headers", FileName);
+      llvm::sys::path::append(PathName, "Headers", Header.FileName);
       File = SourceMgr.getFileManager().getFile(PathName);
       
       if (!File) {
         // Check whether this file is in the private headers.
         PathName.resize(PathLength);
-        llvm::sys::path::append(PathName, "PrivateHeaders", FileName);
+        llvm::sys::path::append(PathName, "PrivateHeaders", Header.FileName);
         File = SourceMgr.getFileManager().getFile(PathName);
       }
     } else {
       // Lookup for normal headers.
-      llvm::sys::path::append(PathName, FileName);
+      llvm::sys::path::append(PathName, Header.FileName);
       File = SourceMgr.getFileManager().getFile(PathName);
       
       // If this is a system module with a top-level header, this header
@@ -1524,9 +1524,9 @@ void ModuleMapParser::parseHeaderDecl(MMToken::TokenKind LeadingToken,
       // supplied by Clang. Find that builtin header.
       if (ActiveModule->IsSystem && LeadingToken != MMToken::UmbrellaKeyword &&
           BuiltinIncludeDir && BuiltinIncludeDir != Directory &&
-          isBuiltinHeader(FileName)) {
+          isBuiltinHeader(Header.FileName)) {
         SmallString<128> BuiltinPathName(BuiltinIncludeDir->getName());
-        llvm::sys::path::append(BuiltinPathName, FileName);
+        llvm::sys::path::append(BuiltinPathName, Header.FileName);
         BuiltinFile = SourceMgr.getFileManager().getFile(BuiltinPathName);
         
         // If Clang supplies this header but the underlying system does not,
@@ -1571,10 +1571,13 @@ void ModuleMapParser::parseHeaderDecl(MMToken::TokenKind LeadingToken,
     }
   } else if (LeadingToken != MMToken::ExcludeKeyword) {
     // Ignore excluded header files. They're optional anyway.
-    
-    Diags.Report(FileNameLoc, diag::err_mmap_header_not_found)
-      << (LeadingToken == MMToken::UmbrellaKeyword) << FileName;
-    HadError = true;
+
+    // If we find a module that has a missing header, we mark this module as
+    // unavailable and store the header directive for displaying diagnostics.
+    // Other submodules in the same module can still be used.
+    Header.IsUmbrella = LeadingToken == MMToken::UmbrellaKeyword;
+    ActiveModule->IsAvailable = false;
+    ActiveModule->MissingHeaders.push_back(Header);
   }
 }
 
@@ -1687,25 +1690,7 @@ void ModuleMapParser::parseUseDecl() {
   consumeToken();
   // Parse the module-id.
   ModuleId ParsedModuleId;
-
-  do {
-    if (Tok.is(MMToken::Identifier)) {
-      ParsedModuleId.push_back(
-          std::make_pair(Tok.getString(), Tok.getLocation()));
-      consumeToken();
-
-      if (Tok.is(MMToken::Period)) {
-        consumeToken();
-        continue;
-      }
-
-      break;
-    }
-
-    Diags.Report(Tok.getLocation(), diag::err_mmap_module_id);
-    HadError = true;
-    return;
-  } while (true);
+  parseModuleId(ParsedModuleId);
 
   ActiveModule->UnresolvedDirectUses.push_back(ParsedModuleId);
 }
@@ -2131,11 +2116,9 @@ bool ModuleMap::parseModuleMapFile(const FileEntry *File, bool IsSystem) {
   
   // Parse this module map file.
   Lexer L(ID, SourceMgr.getBuffer(ID), SourceMgr, MMapLangOpts);
-  Diags->getClient()->BeginSourceFile(MMapLangOpts);
-  ModuleMapParser Parser(L, SourceMgr, Target, *Diags, *this, File->getDir(),
+  ModuleMapParser Parser(L, SourceMgr, Target, Diags, *this, File->getDir(),
                          BuiltinIncludeDir, IsSystem);
   bool Result = Parser.parseModuleMapFile();
-  Diags->getClient()->EndSourceFile();
   ParsedModuleMap[File] = Result;
   return Result;
 }

@@ -3,7 +3,7 @@
 // RUN: %clang_cc1 -std=c++1y %s -verify -fexceptions -fcxx-exceptions -pedantic-errors
 
 // PR13819 -- __SIZE_TYPE__ is incompatible.
-typedef __SIZE_TYPE__ size_t; // expected-warning 0-1 {{extension}}
+typedef __SIZE_TYPE__ size_t; // expected-error 0-1 {{extension}}
 
 #if __cplusplus < 201103L
 #define fold(x) (__builtin_constant_p(x) ? (x) : (x))
@@ -1003,7 +1003,7 @@ namespace dr299 { // dr299: yes c++11
   };
   struct T {
     operator int(); // expected-note {{}}
-    operator unsigned(); // expected-note {{}}
+    operator unsigned short(); // expected-note {{}}
   };
   // FIXME: should this apply to c++98 mode?
   int *p = new int[S()]; // expected-error 0-1{{extension}}
