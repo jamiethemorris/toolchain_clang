@@ -34,8 +34,8 @@
 #include "llvm/Support/Format.h"
 #include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/Program.h"
 #include "llvm/Support/Process.h"
+#include "llvm/Support/Program.h"
 #include "llvm/Support/raw_ostream.h"
 #include <sys/stat.h>
 
@@ -215,6 +215,7 @@ static void addProfileRT(const ToolChain &TC, const ArgList &Args,
                          llvm::Triple Triple) {
   if (!(Args.hasArg(options::OPT_fprofile_arcs) ||
         Args.hasArg(options::OPT_fprofile_generate) ||
+        Args.hasArg(options::OPT_fprofile_instr_generate) ||
         Args.hasArg(options::OPT_fcreate_profile) ||
         Args.hasArg(options::OPT_coverage)))
     return;
@@ -1733,6 +1734,7 @@ static void addProfileRTLinux(
     const ToolChain &TC, const ArgList &Args, ArgStringList &CmdArgs) {
   if (!(Args.hasArg(options::OPT_fprofile_arcs) ||
         Args.hasArg(options::OPT_fprofile_generate) ||
+        Args.hasArg(options::OPT_fprofile_instr_generate) ||
         Args.hasArg(options::OPT_fcreate_profile) ||
         Args.hasArg(options::OPT_coverage)))
     return;
@@ -2643,6 +2645,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_finstrument_functions);
 
+  if (Args.hasArg(options::OPT_fprofile_instr_generate) &&
+      (Args.hasArg(options::OPT_fprofile_instr_use) ||
+       Args.hasArg(options::OPT_fprofile_instr_use_EQ)))
+    D.Diag(diag::err_drv_argument_not_allowed_with)
+      << "-fprofile-instr-generate" << "-fprofile-instr-use";
+
+  Args.AddAllArgs(CmdArgs, options::OPT_fprofile_instr_generate);
+
+  if (Arg *A = Args.getLastArg(options::OPT_fprofile_instr_use_EQ))
+    A->render(Args, CmdArgs);
+  else if (Args.hasArg(options::OPT_fprofile_instr_use))
+    CmdArgs.push_back("-fprofile-instr-use=pgo-data");
+
   if (Args.hasArg(options::OPT_ftest_coverage) ||
       Args.hasArg(options::OPT_coverage))
     CmdArgs.push_back("-femit-coverage-notes");
@@ -2974,8 +2989,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // Forward -f (flag) options which we can pass directly.
   Args.AddLastArg(CmdArgs, options::OPT_femit_all_decls);
   Args.AddLastArg(CmdArgs, options::OPT_fheinous_gnu_extensions);
-  Args.AddLastArg(CmdArgs, options::OPT_flimit_debug_info);
-  Args.AddLastArg(CmdArgs, options::OPT_fno_limit_debug_info);
+  Args.AddLastArg(CmdArgs, options::OPT_fstandalone_debug);
+  Args.AddLastArg(CmdArgs, options::OPT_fno_standalone_debug);
   Args.AddLastArg(CmdArgs, options::OPT_fno_operator_names);
   // AltiVec language extensions aren't relevant for assembling.
   if (!isa<PreprocessJobAction>(JA) || 
@@ -5920,6 +5935,19 @@ void freebsd::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     default:
       CmdArgs.push_back("-matpcs");
     }
+  } else if (getToolChain().getArch() == llvm::Triple::sparc ||
+             getToolChain().getArch() == llvm::Triple::sparcv9) {
+    Arg *LastPICArg = Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
+                                      options::OPT_fpic, options::OPT_fno_pic,
+                                      options::OPT_fPIE, options::OPT_fno_PIE,
+                                      options::OPT_fpie, options::OPT_fno_pie);
+    if (LastPICArg &&
+        (LastPICArg->getOption().matches(options::OPT_fPIC) ||
+         LastPICArg->getOption().matches(options::OPT_fpic) ||
+         LastPICArg->getOption().matches(options::OPT_fPIE) ||
+         LastPICArg->getOption().matches(options::OPT_fpie))) {
+      CmdArgs.push_back("-KPIC");
+    }
   }
 
   Args.AddAllArgValues(CmdArgs, options::OPT_Wa_COMMA,
@@ -6312,6 +6340,7 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
                                       const ArgList &Args,
                                       const char *LinkingOutput) const {
   ArgStringList CmdArgs;
+  bool NeedsKPIC = false;
 
   // Add --32/--64 to make sure we get the format we want.
   // This is incomplete
@@ -6331,6 +6360,14 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-a64");
     CmdArgs.push_back("-mppc64le");
     CmdArgs.push_back("-many");
+  } else if (getToolChain().getArch() == llvm::Triple::sparc) {
+    CmdArgs.push_back("-32");
+    CmdArgs.push_back("-Av8plusa");
+    NeedsKPIC = true;
+  } else if (getToolChain().getArch() == llvm::Triple::sparcv9) {
+    CmdArgs.push_back("-64");
+    CmdArgs.push_back("-Av9a");
+    NeedsKPIC = true;
   } else if (getToolChain().getArch() == llvm::Triple::arm) {
     StringRef MArch = getToolChain().getArchName();
     if (MArch == "armv7" || MArch == "armv7a" || MArch == "armv7-a")
@@ -6393,6 +6430,15 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
         CmdArgs.push_back(Args.MakeArgString("-mmsa"));
     }
 
+    NeedsKPIC = true;
+  } else if (getToolChain().getArch() == llvm::Triple::systemz) {
+    // Always pass an -march option, since our default of z10 is later
+    // than the GNU assembler's default.
+    StringRef CPUName = getSystemZTargetCPU(Args);
+    CmdArgs.push_back(Args.MakeArgString("-march=" + CPUName));
+  }
+
+  if (NeedsKPIC) {
     Arg *LastPICArg = Args.getLastArg(options::OPT_fPIC, options::OPT_fno_PIC,
                                       options::OPT_fpic, options::OPT_fno_pic,
                                       options::OPT_fPIE, options::OPT_fno_PIE,
@@ -6405,11 +6451,6 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
           LastPICArg->getOption().matches(options::OPT_fpie)))) {
       CmdArgs.push_back("-KPIC");
     }
-  } else if (getToolChain().getArch() == llvm::Triple::systemz) {
-    // Always pass an -march option, since our default of z10 is later
-    // than the GNU assembler's default.
-    StringRef CPUName = getSystemZTargetCPU(Args);
-    CmdArgs.push_back(Args.MakeArgString("-march=" + CPUName));
   }
 
   Args.AddAllArgValues(CmdArgs, options::OPT_Wa_COMMA,
@@ -6480,7 +6521,8 @@ static StringRef getLinuxDynamicLinker(const ArgList &Args,
                                        const toolchains::Linux &ToolChain) {
   if (ToolChain.getTriple().getEnvironment() == llvm::Triple::Android)
     return "/system/bin/linker";
-  else if (ToolChain.getArch() == llvm::Triple::x86)
+  else if (ToolChain.getArch() == llvm::Triple::x86 ||
+           ToolChain.getArch() == llvm::Triple::sparc)
     return "/lib/ld-linux.so.2";
   else if (ToolChain.getArch() == llvm::Triple::aarch64)
     return "/lib/ld-linux-aarch64.so.1";
@@ -6505,6 +6547,8 @@ static StringRef getLinuxDynamicLinker(const ArgList &Args,
            ToolChain.getArch() == llvm::Triple::ppc64le ||
            ToolChain.getArch() == llvm::Triple::systemz)
     return "/lib64/ld64.so.1";
+  else if (ToolChain.getArch() == llvm::Triple::sparcv9)
+    return "/lib64/ld-linux.so.2";
   else
     return "/lib64/ld-linux-x86-64.so.2";
 }
@@ -6567,6 +6611,10 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("elf32ppclinux");
   else if (ToolChain.getArch() == llvm::Triple::ppc64)
     CmdArgs.push_back("elf64ppc");
+  else if (ToolChain.getArch() == llvm::Triple::sparc)
+    CmdArgs.push_back("elf32_sparc");
+  else if (ToolChain.getArch() == llvm::Triple::sparcv9)
+    CmdArgs.push_back("elf64_sparc");
   else if (ToolChain.getArch() == llvm::Triple::mips)
     CmdArgs.push_back("elf32btsmip");
   else if (ToolChain.getArch() == llvm::Triple::mipsel)

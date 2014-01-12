@@ -25,9 +25,9 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
+#include "llvm/Option/OptSpecifier.h"
 #include "llvm/Option/OptTable.h"
 #include "llvm/Option/Option.h"
-#include "llvm/Option/OptSpecifier.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
@@ -159,10 +159,11 @@ const {
   Arg *PhaseArg = 0;
   phases::ID FinalPhase;
 
-  // -{E,M,MM} only run the preprocessor.
+  // -{E,M,MM} and /P only run the preprocessor.
   if (CCCIsCPP() ||
       (PhaseArg = DAL.getLastArg(options::OPT_E)) ||
-      (PhaseArg = DAL.getLastArg(options::OPT_M, options::OPT_MM))) {
+      (PhaseArg = DAL.getLastArg(options::OPT_M, options::OPT_MM)) ||
+      (PhaseArg = DAL.getLastArg(options::OPT__SLASH_P))) {
     FinalPhase = phases::Preprocess;
 
     // -{fsyntax-only,-analyze,emit-ast,S} only run up to the compiler.
@@ -1627,6 +1628,14 @@ const char *Driver::GetNamedOutputPath(Compilation &C,
       return C.addResultFile(FinalOutput->getValue(), &JA);
   }
 
+  // For /P, preprocess to file named after BaseInput.
+  if (C.getArgs().hasArg(options::OPT__SLASH_P)) {
+    assert(AtTopLevel && isa<PreprocessJobAction>(JA));
+    StringRef BaseName = llvm::sys::path::filename(BaseInput);
+    return C.addResultFile(MakeCLOutputFilename(C.getArgs(), "", BaseName,
+                                                types::TY_PP_C), &JA);
+  }
+
   // Default to writing to stdout?
   if (AtTopLevel && !CCGenDiagnostics &&
       (isa<PreprocessJobAction>(JA) || JA.getType() == types::TY_ModuleFile))
@@ -1859,17 +1868,24 @@ static llvm::Triple computeTargetTriple(StringRef DefaultTargetTriple,
   if (Target.isOSDarwin()) {
     // If an explict Darwin arch name is given, that trumps all.
     if (!DarwinArchName.empty()) {
-      Target.setArch(
-        tools::darwin::getArchTypeForDarwinArchName(DarwinArchName));
+      if (DarwinArchName == "x86_64h")
+        Target.setArchName(DarwinArchName);
+      else
+        Target.setArch(
+          tools::darwin::getArchTypeForDarwinArchName(DarwinArchName));
       return Target;
     }
 
     // Handle the Darwin '-arch' flag.
     if (Arg *A = Args.getLastArg(options::OPT_arch)) {
-      llvm::Triple::ArchType DarwinArch
-        = tools::darwin::getArchTypeForDarwinArchName(A->getValue());
-      if (DarwinArch != llvm::Triple::UnknownArch)
-        Target.setArch(DarwinArch);
+      if (StringRef(A->getValue()) == "x86_64h")
+        Target.setArchName(A->getValue());
+      else {
+        llvm::Triple::ArchType DarwinArch
+          = tools::darwin::getArchTypeForDarwinArchName(A->getValue());
+        if (DarwinArch != llvm::Triple::UnknownArch)
+          Target.setArch(DarwinArch);
+      }
     }
   }
 
@@ -1895,19 +1911,14 @@ static llvm::Triple computeTargetTriple(StringRef DefaultTargetTriple,
     return Target;
 
   // Handle pseudo-target flags '-m32' and '-m64'.
-  // FIXME: Should this information be in llvm::Triple?
   if (Arg *A = Args.getLastArg(options::OPT_m32, options::OPT_m64)) {
-    if (A->getOption().matches(options::OPT_m32)) {
-      if (Target.getArch() == llvm::Triple::x86_64)
-        Target.setArch(llvm::Triple::x86);
-      if (Target.getArch() == llvm::Triple::ppc64)
-        Target.setArch(llvm::Triple::ppc);
-    } else {
-      if (Target.getArch() == llvm::Triple::x86)
-        Target.setArch(llvm::Triple::x86_64);
-      if (Target.getArch() == llvm::Triple::ppc)
-        Target.setArch(llvm::Triple::ppc64);
-    }
+    llvm::Triple::ArchType AT;
+    if (A->getOption().matches(options::OPT_m32))
+      AT = Target.get32BitArchVariant().getArch();
+    else
+      AT = Target.get64BitArchVariant().getArch();
+    if (AT != llvm::Triple::UnknownArch)
+      Target.setArch(AT);
   }
 
   return Target;
@@ -1974,6 +1985,10 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       }
       if (Target.getArch() == llvm::Triple::xcore) {
         TC = new toolchains::XCore(*this, Target, Args);
+        break;
+      }
+      if (Target.isOSBinFormatELF()) {
+        TC = new toolchains::Generic_ELF(*this, Target, Args);
         break;
       }
       TC = new toolchains::Generic_GCC(*this, Target, Args);

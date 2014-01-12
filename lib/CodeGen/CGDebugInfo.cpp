@@ -1005,7 +1005,13 @@ llvm::DICompositeType CGDebugInfo::getOrCreateInstanceMethodType(
 
   llvm::DIArray EltTypeArray = DBuilder.getOrCreateArray(Elts);
 
-  return DBuilder.createSubroutineType(Unit, EltTypeArray);
+  unsigned Flags = 0;
+  if (Func->getExtProtoInfo().RefQualifier == RQ_LValue)
+    Flags |= llvm::DIDescriptor::FlagLValueReference;
+  if (Func->getExtProtoInfo().RefQualifier == RQ_RValue)
+    Flags |= llvm::DIDescriptor::FlagRValueReference;
+
+  return DBuilder.createSubroutineType(Unit, EltTypeArray, Flags);
 }
 
 /// isFunctionLocalClass - Return true if CXXRecordDecl is defined
@@ -1084,6 +1090,10 @@ CGDebugInfo::CreateCXXMemberFunction(const CXXMethodDecl *Method,
   }
   if (Method->hasPrototype())
     Flags |= llvm::DIDescriptor::FlagPrototyped;
+  if (Method->getRefQualifier() == RQ_LValue)
+    Flags |= llvm::DIDescriptor::FlagLValueReference;
+  if (Method->getRefQualifier() == RQ_RValue)
+    Flags |= llvm::DIDescriptor::FlagRValueReference;
 
   llvm::DIArray TParamsArray = CollectFunctionTemplateParams(Method, Unit);
   llvm::DISubprogram SP =
@@ -1454,13 +1464,13 @@ llvm::DIType CGDebugInfo::CreateType(const RecordType *Ty) {
   // declaration. The completeType, completeRequiredType, and completeClassData
   // callbacks will handle promoting the declaration to a definition.
   if (T ||
+      // Under -fno-standalone-debug:
       (DebugKind <= CodeGenOptions::LimitedDebugInfo &&
-       // Under -flimit-debug-info, emit only a declaration unless the type is
-       // required to be complete.
-       !RD->isCompleteDefinitionRequired() && CGM.getLangOpts().CPlusPlus) ||
-      // If the class is dynamic, only emit a declaration. A definition will be
-      // emitted whenever the vtable is emitted.
-      (CXXDecl && CXXDecl->hasDefinition() && CXXDecl->isDynamicClass()) || T) {
+       // Emit only a forward declaration unless the type is required.
+       ((!RD->isCompleteDefinitionRequired() && CGM.getLangOpts().CPlusPlus) ||
+        // If the class is dynamic, only emit a declaration. A definition will be
+        // emitted whenever the vtable is emitted.
+        (CXXDecl && CXXDecl->hasDefinition() && CXXDecl->isDynamicClass())))) {
     llvm::DIDescriptor FDContext =
       getContextDescriptor(cast<Decl>(RD->getDeclContext()));
     if (!T)
@@ -1829,11 +1839,13 @@ llvm::DIType CGDebugInfo::CreateType(const MemberPointerType *Ty,
   if (!Ty->getPointeeType()->isFunctionType())
     return DBuilder.createMemberPointerType(
         getOrCreateType(Ty->getPointeeType(), U), ClassType);
+
+  const FunctionProtoType *FPT =
+    Ty->getPointeeType()->getAs<FunctionProtoType>();
   return DBuilder.createMemberPointerType(getOrCreateInstanceMethodType(
-      CGM.getContext().getPointerType(
-          QualType(Ty->getClass(), Ty->getPointeeType().getCVRQualifiers())),
-      Ty->getPointeeType()->getAs<FunctionProtoType>(), U),
-                                          ClassType);
+      CGM.getContext().getPointerType(QualType(Ty->getClass(),
+                                               FPT->getTypeQuals())),
+      FPT, U), ClassType);
 }
 
 llvm::DIType CGDebugInfo::CreateType(const AtomicType *Ty,
@@ -2353,7 +2365,6 @@ llvm::DISubprogram CGDebugInfo::getFunctionDeclaration(const Decl *D) {
       llvm::DICompositeType T(S);
       llvm::DISubprogram SP =
           CreateCXXMemberFunction(MD, getOrCreateFile(MD->getLocation()), T);
-      T.addMember(SP);
       return SP;
     }
   }
@@ -3086,7 +3097,6 @@ CGDebugInfo::getOrCreateStaticDataMemberDeclarationOrNull(const VarDecl *D) {
   llvm::DICompositeType Ctxt(
       getContextDescriptor(cast<Decl>(D->getDeclContext())));
   llvm::DIDerivedType T = CreateRecordStaticField(D, Ctxt);
-  Ctxt.addMember(T);
   return T;
 }
 

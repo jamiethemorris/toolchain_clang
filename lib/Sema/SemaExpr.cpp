@@ -112,32 +112,16 @@ static AvailabilityResult DiagnoseAvailabilityOfDecl(Sema &S,
             
     case AR_Deprecated:
       if (S.getCurContextAvailability() != AR_Deprecated)
-        S.EmitDeprecationWarning(D, Message, Loc, UnknownObjCClass, ObjCPDecl);
+        S.EmitAvailabilityWarning(Sema::AD_Deprecation,
+                                  D, Message, Loc, UnknownObjCClass, ObjCPDecl);
       break;
-            
+
     case AR_Unavailable:
-      if (S.getCurContextAvailability() != AR_Unavailable) {
-        if (Message.empty()) {
-          if (!UnknownObjCClass) {
-            S.Diag(Loc, diag::err_unavailable) << D->getDeclName();
-            if (ObjCPDecl)
-              S.Diag(ObjCPDecl->getLocation(), diag::note_property_attribute)
-                << ObjCPDecl->getDeclName() << 1;
-          }
-          else
-            S.Diag(Loc, diag::warn_unavailable_fwdclass_message) 
-              << D->getDeclName();
-        }
-        else
-          S.Diag(Loc, diag::err_unavailable_message) 
-            << D->getDeclName() << Message;
-        S.Diag(D->getLocation(), diag::note_unavailable_here)
-                  << isa<FunctionDecl>(D) << false;
-        if (ObjCPDecl)
-          S.Diag(ObjCPDecl->getLocation(), diag::note_property_attribute)
-          << ObjCPDecl->getDeclName() << 1;
-      }
+      if (S.getCurContextAvailability() != AR_Unavailable)
+        S.EmitAvailabilityWarning(Sema::AD_Unavailable,
+                                  D, Message, Loc, UnknownObjCClass, ObjCPDecl);
       break;
+
     }
     return Result;
 }
@@ -177,8 +161,8 @@ void Sema::NoteDeletedFunction(FunctionDecl *Decl) {
     }
   }
 
-  Diag(Decl->getLocation(), diag::note_unavailable_here)
-    << 1 << true;
+  Diag(Decl->getLocation(), diag::note_availability_specified_here)
+    << Decl << true;
 }
 
 /// \brief Determine whether a FunctionDecl was ever declared with an
@@ -2264,15 +2248,7 @@ Sema::LookupInObjCMethod(LookupResult &Lookup, Scope *S,
         return ExprError();
 
       MarkAnyDeclReferenced(Loc, IV, true);
-      if (!IV->getBackingIvarReferencedInAccessor()) {
-        // Mark this ivar 'referenced' in this method, if it is a backing ivar
-        // of a property and current method is one of its property accessor.
-        const ObjCPropertyDecl *PDecl;
-        const ObjCIvarDecl *BIV = GetIvarBackingPropertyAccessor(CurMethod, PDecl);
-        if (BIV && BIV == IV)
-          IV->setBackingIvarReferencedInAccessor(true);
-      }
-      
+
       ObjCMethodFamily MF = CurMethod->getMethodFamily();
       if (MF != OMF_init && MF != OMF_dealloc && MF != OMF_finalize &&
           !IvarBacksCurrentMethodAccessor(IFace, CurMethod, IV))
@@ -3260,9 +3236,12 @@ static bool CheckExtensionTraitOperandType(Sema &S, QualType T,
     return false;
   }
 
-  // Allow sizeof(void)/alignof(void) as an extension.
+  // Allow sizeof(void)/alignof(void) as an extension, unless in OpenCL where
+  // this is an error (OpenCL v1.1 s6.3.k)
   if (T->isVoidType()) {
-    S.Diag(Loc, diag::ext_sizeof_alignof_void_type) << TraitKind << ArgRange;
+    unsigned DiagID = S.LangOpts.OpenCL ? diag::err_opencl_sizeof_alignof_type
+                                        : diag::ext_sizeof_alignof_void_type;
+    S.Diag(Loc, DiagID) << TraitKind << ArgRange;
     return false;
   }
 
@@ -3303,7 +3282,7 @@ static void warnOnSizeofOnArrayDecay(Sema &S, SourceLocation Loc, QualType T,
                                              << ICE->getSubExpr()->getType();
 }
 
-/// \brief Check the constrains on expression operands to unary type expression
+/// \brief Check the constraints on expression operands to unary type expression
 /// and type traits.
 ///
 /// Completes any types necessary and validates the constraints on the operand
@@ -4494,6 +4473,21 @@ Sema::ActOnCallExpr(Scope *S, Expr *Fn, SourceLocation LParenLoc,
     NDecl = cast<DeclRefExpr>(NakedFn)->getDecl();
   else if (isa<MemberExpr>(NakedFn))
     NDecl = cast<MemberExpr>(NakedFn)->getMemberDecl();
+
+  if (FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(NDecl)) {
+    if (FD->hasAttr<EnableIfAttr>()) {
+      if (const EnableIfAttr *Attr = CheckEnableIf(FD, ArgExprs, true)) {
+        Diag(Fn->getLocStart(),
+             isa<CXXMethodDecl>(FD) ?
+                 diag::err_ovl_no_viable_member_function_in_call :
+                 diag::err_ovl_no_viable_function_in_call)
+          << FD << FD->getSourceRange();
+        Diag(FD->getLocation(),
+             diag::note_ovl_candidate_disabled_by_enable_if_attr)
+            << Attr->getCond()->getSourceRange() << Attr->getMessage();
+      }
+    }
+  }
 
   return BuildResolvedCallExpr(Fn, NDecl, LParenLoc, ArgExprs, RParenLoc,
                                ExecConfig, IsExecConfig);
@@ -6633,6 +6627,46 @@ QualType Sema::InvalidOperands(SourceLocation Loc, ExprResult &LHS,
   return QualType();
 }
 
+static bool areVectorOperandsLaxBitCastable(ASTContext &Ctx,
+                                            QualType LHSType, QualType RHSType){
+  if (!Ctx.getLangOpts().LaxVectorConversions)
+    return false;
+
+  if (!(LHSType->isVectorType() || LHSType->isScalarType()) ||
+      !(RHSType->isVectorType() || RHSType->isScalarType()))
+    return false;
+
+  unsigned LHSSize = Ctx.getTypeSize(LHSType);
+  unsigned RHSSize = Ctx.getTypeSize(RHSType);
+  if (LHSSize != RHSSize)
+    return false;
+
+  // For a non-power-of-2 vector ASTContext::getTypeSize returns the size
+  // rounded to the next power-of-2, but the LLVM IR type that we create
+  // is considered to have num-of-elements*width-of-element width.
+  // Make sure such width is the same between the types, otherwise we may end
+  // up with an invalid bitcast.
+  unsigned LHSIRSize, RHSIRSize;
+  if (LHSType->isVectorType()) {
+    const VectorType *Vec = LHSType->getAs<VectorType>();
+    LHSIRSize = Vec->getNumElements() *
+        Ctx.getTypeSize(Vec->getElementType());
+  } else {
+    LHSIRSize = LHSSize;
+  }
+  if (RHSType->isVectorType()) {
+    const VectorType *Vec = RHSType->getAs<VectorType>();
+    RHSIRSize = Vec->getNumElements() *
+        Ctx.getTypeSize(Vec->getElementType());
+  } else {
+    RHSIRSize = RHSSize;
+  }
+  if (LHSIRSize != RHSIRSize)
+    return false;
+
+  return true;
+}
+
 QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
                                    SourceLocation Loc, bool IsCompAssign) {
   if (!IsCompAssign) {
@@ -6668,14 +6702,21 @@ QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
     return RHSType;
   }
 
-  if (getLangOpts().LaxVectorConversions &&
-      Context.getTypeSize(LHSType) == Context.getTypeSize(RHSType)) {
+  if (areVectorOperandsLaxBitCastable(Context, LHSType, RHSType)) {
     // If we are allowing lax vector conversions, and LHS and RHS are both
     // vectors, the total size only needs to be the same. This is a
     // bitcast; no bits are changed but the result type is different.
     // FIXME: Should we really be allowing this?
     RHS = ImpCastExprToType(RHS.take(), LHSType, CK_BitCast);
     return LHSType;
+  }
+
+  if (!(LHSType->isVectorType() || LHSType->isScalarType()) ||
+      !(RHSType->isVectorType() || RHSType->isScalarType())) {
+    Diag(Loc, diag::err_typecheck_vector_not_convertable_non_scalar)
+    << LHS.get()->getType() << RHS.get()->getType()
+    << LHS.get()->getSourceRange() << RHS.get()->getSourceRange();
+    return QualType();
   }
 
   // Canonicalize the ExtVector to the LHS, remember if we swapped so we can
@@ -10379,7 +10420,7 @@ ExprResult Sema::ActOnBlockStmtExpr(SourceLocation CaretLoc,
   if (!BSI->ReturnType.isNull())
     RetTy = BSI->ReturnType;
 
-  bool NoReturn = BSI->TheDecl->getAttr<NoReturnAttr>();
+  bool NoReturn = BSI->TheDecl->hasAttr<NoReturnAttr>();
   QualType BlockTy;
 
   // Set the captured variables on the block.
@@ -11616,6 +11657,15 @@ static ExprResult addAsFieldToClosureType(Sema &S,
                                   SourceLocation Loc,
                                   bool RefersToEnclosingLocal) {
   CXXRecordDecl *Lambda = LSI->Lambda;
+
+  // Make sure that by-copy captures are of a complete type.
+  if (!DeclRefType->isDependentType() &&
+      !DeclRefType->isReferenceType() &&
+      S.RequireCompleteType(Loc, DeclRefType,
+                            diag::err_capture_of_incomplete_type,
+                            Var->getDeclName())) {
+    return ExprError();
+  }
 
   // Build the non-static data member.
   FieldDecl *Field

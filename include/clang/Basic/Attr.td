@@ -70,7 +70,6 @@ class ExprArgument<string name, bit opt = 0> : Argument<name, opt>;
 class FunctionArgument<string name, bit opt = 0> : Argument<name, opt>;
 class TypeArgument<string name, bit opt = 0> : Argument<name, opt>;
 class UnsignedArgument<string name, bit opt = 0> : Argument<name, opt>;
-class SourceLocArgument<string name, bit opt = 0> : Argument<name, opt>;
 class VariadicUnsignedArgument<string name> : Argument<name, 1>;
 class VariadicExprArgument<string name> : Argument<name, 1>;
 
@@ -143,6 +142,21 @@ def MicrosoftExt : LangOpt<"MicrosoftExt">;
 def Borland : LangOpt<"Borland">;
 def CUDA : LangOpt<"CUDA">;
 
+// Defines targets for target-specific attributes. The list of strings should
+// specify architectures for which the target applies, based off the ArchType
+// enumeration in Triple.h.
+class TargetArch<list<string> arches> {
+  list<string> Arches = arches;
+  list<string> OSes;
+}
+def TargetARM : TargetArch<["arm", "thumb"]>;
+def TargetMSP430 : TargetArch<["msp430"]>;
+def TargetX86 : TargetArch<["x86"]>;
+def TargetX86Win : TargetArch<["x86", "x86_64"]> {
+  let OSes = ["Win32", "MinGW32"];
+}
+def TargetMips : TargetArch<["mips", "mipsel"]>;
+
 class Attr {
   // The various ways in which an attribute can be spelled in source
   list<Spelling> Spellings;
@@ -169,6 +183,9 @@ class Attr {
   // content. Eg) It parses 3 args, but semantically takes 4 args.  Opts out of
   // common attribute error checking.
   bit HasCustomParsing = 0;
+  // Set to true if all of the attribute's arguments should be parsed in an
+  // unevaluated context.
+  bit ParseArgumentsAsUnevaluated = 0;
   // Lists language options, one of which is required to be true for the
   // attribute to be applicable. If empty, no language options are required.
   list<LangOpt> LangOpts = [];
@@ -178,16 +195,17 @@ class Attr {
 
 /// A type attribute is not processed on a declaration or a statement.
 class TypeAttr : Attr {
+  // By default, type attributes do not get an AST node.
   let ASTNode = 0;
 }
 
 /// An inheritable attribute is inherited by later redeclarations.
 class InheritableAttr : Attr;
 
-/// A target-specific attribute that is meant to be processed via
-/// TargetAttributesSema::ProcessDeclAttribute.  This class is meant to be used
-/// as a mixin with InheritableAttr or Attr depending on the attribute's needs.
-class TargetSpecificAttr {
+/// A target-specific attribute.  This class is meant to be used as a mixin
+/// with InheritableAttr or Attr depending on the attribute's needs.
+class TargetSpecificAttr<TargetArch target> {
+  TargetArch Target = target;
   // Attributes are generally required to have unique spellings for their names
   // so that the parser can determine what kind of attribute it has parsed.
   // However, target-specific attributes are special in that the attribute only
@@ -222,7 +240,6 @@ class IgnoredAttr : Attr {
 def AddressSpace : TypeAttr {
   let Spellings = [GNU<"address_space">];
   let Args = [IntArgument<"AddressSpace">];
-  let ASTNode = 0;
 }
 
 def Alias : Attr {
@@ -247,11 +264,6 @@ def AlignMac68k : InheritableAttr {
   let SemaHandler = 0;
 }
 
-def AllocSize : InheritableAttr {
-  let Spellings = [GNU<"alloc_size">, CXX11<"gnu", "alloc_size">];
-  let Args = [VariadicUnsignedArgument<"Args">];
-}
-
 def AlwaysInline : InheritableAttr {
   let Spellings = [GNU<"always_inline">, CXX11<"gnu", "always_inline">];
   let Subjects = SubjectList<[Function]>;
@@ -272,7 +284,7 @@ def Annotate : InheritableParamAttr {
   let Args = [StringArgument<"Annotation">];
 }
 
-def ARMInterrupt : InheritableAttr, TargetSpecificAttr {
+def ARMInterrupt : InheritableAttr, TargetSpecificAttr<TargetARM> {
   // NOTE: If you add any additional spellings, MSP430Interrupt's spellings
   // must match.
   let Spellings = [GNU<"interrupt">];
@@ -414,6 +426,9 @@ def CUDALaunchBounds : InheritableAttr {
   let Spellings = [GNU<"launch_bounds">];
   let Args = [IntArgument<"MaxThreads">, DefaultIntArgument<"MinBlocks", 0>];
   let LangOpts = [CUDA];
+  // An AST node is created for this attribute, but is not used by other parts
+  // of the compiler. However, this node needs to exist in the AST because
+  // non-LLVM backends may be relying on the attribute's presence.
 }
 
 def CUDAShared : InheritableAttr {
@@ -435,6 +450,7 @@ def CXX11NoReturn : InheritableAttr {
 
 def OpenCLKernel : InheritableAttr {
   let Spellings = [Keyword<"__kernel">, Keyword<"kernel">];
+  let Subjects = SubjectList<[Function], ErrorDiag>;
 }
 
 def OpenCLImageAccess : Attr {
@@ -452,6 +468,13 @@ def Destructor : InheritableAttr {
   let Spellings = [GNU<"destructor">, CXX11<"gnu", "destructor">];
   let Args = [DefaultIntArgument<"Priority", 65535>];
   let Subjects = SubjectList<[Function]>;
+}
+
+def EnableIf : InheritableAttr {
+  let Spellings = [GNU<"enable_if">];
+  let Subjects = SubjectList<[Function]>;
+  let Args = [ExprArgument<"Cond">, StringArgument<"Message">];
+  let TemplateDependent = 1;
 }
 
 def ExtVectorType : Attr {
@@ -546,7 +569,7 @@ def MSABI : InheritableAttr {
 //  let Subjects = [Function, ObjCMethod];
 }
 
-def MSP430Interrupt : InheritableAttr, TargetSpecificAttr {
+def MSP430Interrupt : InheritableAttr, TargetSpecificAttr<TargetMSP430> {
   // NOTE: If you add any additional spellings, ARMInterrupt's spellings must
   // match.
   let Spellings = [GNU<"interrupt">];
@@ -555,7 +578,7 @@ def MSP430Interrupt : InheritableAttr, TargetSpecificAttr {
   let HasCustomParsing = 1;
 }
 
-def Mips16 : InheritableAttr, TargetSpecificAttr {
+def Mips16 : InheritableAttr, TargetSpecificAttr<TargetMips> {
   let Spellings = [GNU<"mips16">, CXX11<"gnu", "mips16">];
   let Subjects = SubjectList<[Function], ErrorDiag>;
 }
@@ -573,13 +596,11 @@ def Naked : InheritableAttr {
 def NeonPolyVectorType : TypeAttr {
   let Spellings = [GNU<"neon_polyvector_type">];
   let Args = [IntArgument<"NumElements">];
-  let ASTNode = 0;
 }
 
 def NeonVectorType : TypeAttr {
   let Spellings = [GNU<"neon_vector_type">];
   let Args = [IntArgument<"NumElements">];
-  let ASTNode = 0;
 }
 
 def ReturnsTwice : InheritableAttr {
@@ -601,7 +622,7 @@ def NoInline : InheritableAttr {
   let Subjects = SubjectList<[Function]>;
 }
 
-def NoMips16 : InheritableAttr, TargetSpecificAttr {
+def NoMips16 : InheritableAttr, TargetSpecificAttr<TargetMips> {
   let Spellings = [GNU<"nomips16">, CXX11<"gnu", "nomips16">];
   let Subjects = SubjectList<[Function], ErrorDiag>;
 }
@@ -632,12 +653,6 @@ def NoInstrumentFunction : InheritableAttr {
 
 def NoThrow : InheritableAttr {
   let Spellings = [GNU<"nothrow">, CXX11<"gnu", "nothrow">];
-}
-
-def NSBridged : InheritableAttr {
-  let Spellings = [GNU<"ns_bridged">];
-  let Subjects = SubjectList<[Struct], ErrorDiag, "ExpectedStruct">;
-  let Args = [IdentifierArgument<"BridgedType", 1>];
 }
 
 def ObjCBridge : InheritableAttr {
@@ -789,9 +804,10 @@ def Pure : InheritableAttr {
   let Spellings = [GNU<"pure">, CXX11<"gnu", "pure">];
 }
 
-def Regparm : InheritableAttr {
+def Regparm : TypeAttr {
   let Spellings = [GNU<"regparm">, CXX11<"gnu", "regparm">];
   let Args = [UnsignedArgument<"NumParams">];
+  let ASTNode = 0;
 }
 
 def ReqdWorkGroupSize : InheritableAttr {
@@ -818,8 +834,9 @@ def InitPriority : InheritableAttr {
 def Section : InheritableAttr {
   let Spellings = [GNU<"section">, CXX11<"gnu", "section">];
   let Args = [StringArgument<"Name">];
-  let Subjects = SubjectList<[Function, GlobalVar], ErrorDiag,
-                             "ExpectedFunctionOrGlobalVar">;
+  let Subjects = SubjectList<[Function, GlobalVar, 
+                              ObjCMethod, ObjCProperty], ErrorDiag,
+                             "ExpectedFunctionGlobalVarMethodOrProperty">;
 }
 
 def Sentinel : InheritableAttr {
@@ -869,7 +886,6 @@ def ArcWeakrefUnavailable : InheritableAttr {
 def ObjCGC : TypeAttr {
   let Spellings = [GNU<"objc_gc">];
   let Args = [IdentifierArgument<"Kind">];
-  let ASTNode = 0;
 }
 
 def ObjCOwnership : InheritableAttr {
@@ -901,7 +917,6 @@ def Uuid : InheritableAttr {
 def VectorSize : TypeAttr {
   let Spellings = [GNU<"vector_size">, CXX11<"gnu", "vector_size">];
   let Args = [ExprArgument<"NumBytes">];
-  let ASTNode = 0;
 }
 
 def VecTypeHint : InheritableAttr {
@@ -959,8 +974,11 @@ def WeakRef : InheritableAttr {
   let Subjects = SubjectList<[Var, Function], ErrorDiag>;
 }
 
-def X86ForceAlignArgPointer : InheritableAttr, TargetSpecificAttr {
-  let Spellings = [];
+def X86ForceAlignArgPointer : InheritableAttr, TargetSpecificAttr<TargetX86> {
+  let Spellings = [GNU<"force_align_arg_pointer">];
+  // Technically, this appertains to a FunctionDecl, but the target-specific
+  // code silently allows anything function-like (such as typedefs or function
+  // pointers), but does not apply the attribute to them.
 }
 
 // Attribute to disable AddressSanitizer (or equivalent) checks.
@@ -1018,6 +1036,7 @@ def GuardedBy : InheritableAttr {
   let Args = [ExprArgument<"Arg">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Field, SharedVar], WarnDiag,
                              "ExpectedFieldOrGlobalVar">;
 }
@@ -1027,6 +1046,7 @@ def PtGuardedBy : InheritableAttr {
   let Args = [ExprArgument<"Arg">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Field, SharedVar], WarnDiag,
                              "ExpectedFieldOrGlobalVar">;
 }
@@ -1036,6 +1056,7 @@ def AcquiredAfter : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Field, SharedVar], WarnDiag,
                              "ExpectedFieldOrGlobalVar">;
 }
@@ -1045,6 +1066,7 @@ def AcquiredBefore : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Field, SharedVar], WarnDiag,
                              "ExpectedFieldOrGlobalVar">;
 }
@@ -1054,6 +1076,7 @@ def ExclusiveLockFunction : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1062,6 +1085,7 @@ def SharedLockFunction : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1070,6 +1094,7 @@ def AssertExclusiveLock : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1078,6 +1103,7 @@ def AssertSharedLock : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1088,6 +1114,7 @@ def ExclusiveTrylockFunction : InheritableAttr {
   let Args = [ExprArgument<"SuccessValue">, VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1098,6 +1125,7 @@ def SharedTrylockFunction : InheritableAttr {
   let Args = [ExprArgument<"SuccessValue">, VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1106,6 +1134,7 @@ def UnlockFunction : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1114,6 +1143,7 @@ def LockReturned : InheritableAttr {
   let Args = [ExprArgument<"Arg">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1122,6 +1152,7 @@ def LocksExcluded : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1130,6 +1161,7 @@ def ExclusiveLocksRequired : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1138,6 +1170,7 @@ def SharedLocksRequired : InheritableAttr {
   let Args = [VariadicExprArgument<"Args">];
   let LateParsed = 1;
   let TemplateDependent = 1;
+  let ParseArgumentsAsUnevaluated = 1;
   let Subjects = SubjectList<[Function, FunctionTemplate]>;
 }
 
@@ -1224,12 +1257,12 @@ def MsStruct : InheritableAttr {
   let Subjects = SubjectList<[Record]>;
 }
 
-def DLLExport : InheritableAttr, TargetSpecificAttr {
+def DLLExport : InheritableAttr, TargetSpecificAttr<TargetX86Win> {
   let Spellings = [Declspec<"dllexport">];
   let Subjects = SubjectList<[Function, Var]>;
 }
 
-def DLLImport : InheritableAttr, TargetSpecificAttr {
+def DLLImport : InheritableAttr, TargetSpecificAttr<TargetX86Win> {
   let Spellings = [Declspec<"dllimport">];
   // Technically, the subjects for DllImport are Function and Var, but there is
   // custom semantic handling required when MicrosoftExt is true.
@@ -1252,44 +1285,35 @@ def Win64 : IgnoredAttr {
 
 def Ptr32 : TypeAttr {
   let Spellings = [Keyword<"__ptr32">];
-  let ASTNode = 0;
 }
 
 def Ptr64 : TypeAttr {
   let Spellings = [Keyword<"__ptr64">];
-  let ASTNode = 0;
 }
 
 def SPtr : TypeAttr {
   let Spellings = [Keyword<"__sptr">];
-  let ASTNode = 0;
 }
 
 def UPtr : TypeAttr {
   let Spellings = [Keyword<"__uptr">];
-  let ASTNode = 0;
 }
 
-class MSInheritanceAttr : InheritableAttr {
+def MSInheritance : InheritableAttr {
   let LangOpts = [MicrosoftExt];
-}
-
-def SingleInheritance : MSInheritanceAttr {
-  let Spellings = [Keyword<"__single_inheritance">];
-}
-
-def MultipleInheritance : MSInheritanceAttr {
-  let Spellings = [Keyword<"__multiple_inheritance">];
-}
-
-def VirtualInheritance : MSInheritanceAttr {
-  let Spellings = [Keyword<"__virtual_inheritance">];
-}
-
-// This attribute doesn't have any spellings, but we can apply it implicitly to
-// incomplete types that lack any of the other attributes.
-def UnspecifiedInheritance : MSInheritanceAttr {
-  let Spellings = [];
+  let Spellings = [Keyword<"__single_inheritance">,
+                   Keyword<"__multiple_inheritance">,
+                   Keyword<"__virtual_inheritance">,
+                   // We use an empty string to denote an unspecified
+                   // inheritance attribute.
+                   Keyword<"">];
+  let Accessors = [Accessor<"IsSingle", [Keyword<"__single_inheritance">]>,
+                   Accessor<"IsMultiple", [Keyword<"__multiple_inheritance">]>,
+                   Accessor<"IsVirtual", [Keyword<"__virtual_inheritance">]>,
+                   Accessor<"IsUnspecified", [Keyword<"">]>];
+  // This index is based off the Spellings list and corresponds to the empty
+  // keyword "spelling."
+  let AdditionalMembers = [{static const int UnspecifiedSpellingIndex = 3;}];
 }
 
 def Unaligned : IgnoredAttr {
