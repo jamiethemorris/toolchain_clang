@@ -14,13 +14,13 @@
 #include "clang/Frontend/CodeGenOptions.h"
 #include "clang/Frontend/FrontendDiagnostic.h"
 #include "clang/Frontend/Utils.h"
-#include "llvm/Analysis/Verifier.h"
-#include "llvm/Bitcode/ReaderWriter.h"
+#include "llvm/Bitcode/BitcodeWriterPass.h"
 #include "llvm/CodeGen/RegAllocRegistry.h"
 #include "llvm/CodeGen/SchedulerRegistry.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/IRPrintingPasses.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/MC/SubtargetFeature.h"
 #include "llvm/PassManager.h"
 #include "llvm/Support/CommandLine.h"
@@ -180,12 +180,10 @@ static void addAddressSanitizerPasses(const PassManagerBuilder &Builder,
       LangOpts.Sanitize.InitOrder,
       LangOpts.Sanitize.UseAfterReturn,
       LangOpts.Sanitize.UseAfterScope,
-      CGOpts.SanitizerBlacklistFile,
-      CGOpts.SanitizeAddressZeroBaseShadow));
+      CGOpts.SanitizerBlacklistFile));
   PM.add(createAddressSanitizerModulePass(
       LangOpts.Sanitize.InitOrder,
-      CGOpts.SanitizerBlacklistFile,
-      CGOpts.SanitizeAddressZeroBaseShadow));
+      CGOpts.SanitizerBlacklistFile));
 }
 
 static void addMemorySanitizerPass(const PassManagerBuilder &Builder,

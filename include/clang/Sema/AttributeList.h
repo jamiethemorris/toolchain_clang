@@ -494,6 +494,14 @@ public:
   bool diagnoseAppertainsTo(class Sema &S, const Decl *D) const;
   bool diagnoseLangOpts(class Sema &S) const;
   bool existsInTarget(llvm::Triple T) const;
+  bool isKnownToGCC() const;
+
+  /// \brief If the parsed attribute has a semantic equivalent, and it would
+  /// have a semantic Spelling enumeration (due to having semantically-distinct
+  /// spelling variations), return the value of that semantic spelling. If the
+  /// parsed attribute does not have a semantic equivalent, or would not have
+  /// a Spelling enumeration, the value UINT_MAX is returned.
+  unsigned getSemanticSpelling() const;
 };
 
 /// A factory, from which one makes pools, from which one creates
@@ -647,9 +655,6 @@ public:
                                           Param1, Param2, Param3,
                                           syntax));
   }
-
-  AttributeList *createIntegerAttribute(ASTContext &C, IdentifierInfo *Name,
-                                        SourceLocation TokLoc, int Arg);
 
   AttributeList *createTypeTagForDatatype(
                     IdentifierInfo *attrName, SourceRange attrRange,
@@ -862,15 +867,6 @@ public:
     add(attr);
     return attr;
   }
-
-  AttributeList *addNewInteger(ASTContext &C, IdentifierInfo *name,
-                               SourceLocation loc, int arg) {
-    AttributeList *attr =
-      pool.createIntegerAttribute(C, name, loc, arg);
-    add(attr);
-    return attr;
-  }
-
 
 private:
   mutable AttributePool pool;

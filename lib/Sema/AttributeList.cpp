@@ -106,14 +106,6 @@ void AttributePool::takePool(AttributeList *pool) {
   } while (pool);
 }
 
-AttributeList *
-AttributePool::createIntegerAttribute(ASTContext &C, IdentifierInfo *Name,
-                                      SourceLocation TokLoc, int Arg) {
-  ArgsUnion IArg = IntegerLiteral::Create(C, llvm::APInt(32, (uint64_t) Arg),
-                                      C.IntTy, TokLoc);
-  return create(Name, TokLoc, 0, TokLoc, &IArg, 1, AttributeList::AS_GNU);
-}
-
 #include "clang/Sema/AttrParsedAttrKinds.inc"
 
 AttributeList::Kind AttributeList::getKind(const IdentifierInfo *Name,
@@ -139,7 +131,7 @@ AttributeList::Kind AttributeList::getKind(const IdentifierInfo *Name,
     FullName += "::";
   FullName += AttrName;
 
-  return ::getAttrKind(FullName);
+  return ::getAttrKind(FullName, SyntaxUsed);
 }
 
 unsigned AttributeList::getAttributeSpellingListIndex() const {
@@ -158,11 +150,13 @@ struct ParsedAttrInfo {
   unsigned HasCustomParsing : 1;
   unsigned IsTargetSpecific : 1;
   unsigned IsType : 1;
+  unsigned IsKnownToGCC : 1;
 
   bool (*DiagAppertainsToDecl)(Sema &S, const AttributeList &Attr,
                                const Decl *);
   bool (*DiagLangOpts)(Sema &S, const AttributeList &Attr);
   bool (*ExistsInTarget)(llvm::Triple T);
+  unsigned (*SpellingIndexToSemanticSpelling)(const AttributeList &Attr);
 };
 
 namespace {
@@ -203,4 +197,12 @@ bool AttributeList::isTypeAttr() const {
 
 bool AttributeList::existsInTarget(llvm::Triple T) const {
   return getInfo(*this).ExistsInTarget(T);
+}
+
+bool AttributeList::isKnownToGCC() const {
+  return getInfo(*this).IsKnownToGCC;
+}
+
+unsigned AttributeList::getSemanticSpelling() const {
+  return getInfo(*this).SpellingIndexToSemanticSpelling(*this);
 }

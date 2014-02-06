@@ -320,6 +320,19 @@ ASTConsumer *DumpModuleInfoAction::CreateASTConsumer(CompilerInstance &CI,
   return new ASTConsumer();
 }
 
+ASTConsumer *VerifyPCHAction::CreateASTConsumer(CompilerInstance &CI,
+                                                StringRef InFile) {
+  return new ASTConsumer();
+}
+
+void VerifyPCHAction::ExecuteAction() {
+  getCompilerInstance().
+    createPCHExternalASTSource(getCurrentFile(), /*DisablePCHValidation*/false,
+                               /*AllowPCHWithCompilerErrors*/false,
+                               /*AllowConfigurationMismatch*/true,
+                               /*DeserializationListener*/0);
+}
+
 namespace {
   /// \brief AST reader listener that dumps module information for a module
   /// file.
@@ -363,7 +376,6 @@ namespace {
       Out.indent(4) << "  Triple: " << TargetOpts.Triple << "\n";
       Out.indent(4) << "  CPU: " << TargetOpts.CPU << "\n";
       Out.indent(4) << "  ABI: " << TargetOpts.ABI << "\n";
-      Out.indent(4) << "  C++ ABI: " << TargetOpts.CXXABI << "\n";
       Out.indent(4) << "  Linker version: " << TargetOpts.LinkerVersion << "\n";
 
       if (!TargetOpts.FeaturesAsWritten.empty()) {

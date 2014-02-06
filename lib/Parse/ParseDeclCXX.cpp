@@ -14,6 +14,7 @@
 #include "clang/Parse/Parser.h"
 #include "RAIIObjectsForParser.h"
 #include "clang/AST/DeclTemplate.h"
+#include "clang/AST/ASTContext.h"
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/OperatorKinds.h"
 #include "clang/Parse/ParseDiagnostic.h"
@@ -786,12 +787,13 @@ SourceLocation Parser::ParseDecltypeSpecifier(DeclSpec &DS) {
 
   const char *PrevSpec = 0;
   unsigned DiagID;
+  const PrintingPolicy &Policy = Actions.getASTContext().getPrintingPolicy();
   // Check for duplicate type specifiers (e.g. "int decltype(a)").
   if (Result.get()
         ? DS.SetTypeSpecType(DeclSpec::TST_decltype, StartLoc, PrevSpec,
-                             DiagID, Result.release())
+                             DiagID, Result.release(), Policy)
         : DS.SetTypeSpecType(DeclSpec::TST_decltype_auto, StartLoc, PrevSpec,
-                             DiagID)) {
+                             DiagID, Policy)) {
     Diag(StartLoc, DiagID) << PrevSpec;
     DS.SetTypeSpecError();
   }
@@ -842,7 +844,8 @@ void Parser::ParseUnderlyingTypeSpecifier(DeclSpec &DS) {
   const char *PrevSpec = 0;
   unsigned DiagID;
   if (DS.SetTypeSpecType(DeclSpec::TST_underlyingType, StartLoc, PrevSpec,
-                         DiagID, Result.release()))
+                         DiagID, Result.release(),
+                         Actions.getASTContext().getPrintingPolicy()))
     Diag(StartLoc, DiagID) << PrevSpec;
   DS.setTypeofParensRange(T.getRange());
 }
@@ -990,7 +993,8 @@ Parser::TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
 
   const char *PrevSpec = 0;
   unsigned DiagID;
-  DS.SetTypeSpecType(TST_typename, IdLoc, PrevSpec, DiagID, Type);
+  DS.SetTypeSpecType(TST_typename, IdLoc, PrevSpec, DiagID, Type,
+                     Actions.getASTContext().getPrintingPolicy());
 
   Declarator DeclaratorInfo(DS, Declarator::TypeNameContext);
   return Actions.ActOnTypeName(getCurScope(), DeclaratorInfo);
@@ -1311,6 +1315,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   // If there are attributes after class name, parse them.
   MaybeParseCXX11Attributes(Attributes);
 
+  const PrintingPolicy &Policy = Actions.getASTContext().getPrintingPolicy();
   Sema::TagUseKind TUK;
   if (DSC == DSC_trailing)
     TUK = Sema::TUK_Reference;
@@ -1368,9 +1373,10 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
               (Tok.isAtStartOfLine() && !isValidAfterTypeSpecifier(false)))) {
     TUK = DS.isFriendSpecified() ? Sema::TUK_Friend : Sema::TUK_Declaration;
     if (Tok.isNot(tok::semi)) {
+      const PrintingPolicy &PPol = Actions.getASTContext().getPrintingPolicy();
       // A semicolon was missing after this declaration. Diagnose and recover.
       ExpectAndConsume(tok::semi, diag::err_expected_after,
-                       DeclSpec::getSpecifierName(TagType));
+                       DeclSpec::getSpecifierName(TagType, PPol));
       PP.EnterToken(Tok);
       Tok.setKind(tok::semi);
     }
@@ -1412,7 +1418,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
     if (DS.getTypeSpecType() != DeclSpec::TST_error) {
       // We have a declaration or reference to an anonymous class.
       Diag(StartLoc, diag::err_anon_type_definition)
-        << DeclSpec::getSpecifierName(TagType);
+        << DeclSpec::getSpecifierName(TagType, Policy);
     }
 
     // If we are parsing a definition and stop at a base-clause, continue on
@@ -1609,11 +1615,12 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   if (!TypeResult.isInvalid()) {
     Result = DS.SetTypeSpecType(DeclSpec::TST_typename, StartLoc,
                                 NameLoc.isValid() ? NameLoc : StartLoc,
-                                PrevSpec, DiagID, TypeResult.get());
+                                PrevSpec, DiagID, TypeResult.get(), Policy);
   } else if (!TagOrTempResult.isInvalid()) {
     Result = DS.SetTypeSpecType(TagType, StartLoc,
                                 NameLoc.isValid() ? NameLoc : StartLoc,
-                                PrevSpec, DiagID, TagOrTempResult.get(), Owned);
+                                PrevSpec, DiagID, TagOrTempResult.get(), Owned,
+                                Policy);
   } else {
     DS.SetTypeSpecError();
     return;
@@ -1634,8 +1641,9 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
   if (TUK == Sema::TUK_Definition &&
       (TemplateInfo.Kind || !isValidAfterTypeSpecifier(false))) {
     if (Tok.isNot(tok::semi)) {
+      const PrintingPolicy &PPol = Actions.getASTContext().getPrintingPolicy();
       ExpectAndConsume(tok::semi, diag::err_expected_after,
-                       DeclSpec::getSpecifierName(TagType));
+                       DeclSpec::getSpecifierName(TagType, PPol));
       // Push this token back into the preprocessor and change our current token
       // to ';' so that the rest of the code recovers as though there were an
       // ';' after the definition.
@@ -1880,6 +1888,53 @@ bool Parser::isCXX11FinalKeyword() const {
          Specifier == VirtSpecifiers::VS_Sealed;
 }
 
+/// \brief Parse a C++ member-declarator up to, but not including, the optional
+/// brace-or-equal-initializer or pure-specifier.
+void Parser::ParseCXXMemberDeclaratorBeforeInitializer(
+    Declarator &DeclaratorInfo, VirtSpecifiers &VS, ExprResult &BitfieldSize,
+    LateParsedAttrList &LateParsedAttrs) {
+  // member-declarator:
+  //   declarator pure-specifier[opt]
+  //   declarator brace-or-equal-initializer[opt]
+  //   identifier[opt] ':' constant-expression
+  if (Tok.isNot(tok::colon)) {
+    // Don't parse FOO:BAR as if it were a typo for FOO::BAR, in this context it
+    // is a bitfield.
+    // FIXME: This should only apply when parsing the id-expression (see
+    // PR18587).
+    ColonProtectionRAIIObject X(*this);
+    ParseDeclarator(DeclaratorInfo);
+  }
+
+  if (!DeclaratorInfo.isFunctionDeclarator() && TryConsumeToken(tok::colon)) {
+    BitfieldSize = ParseConstantExpression();
+    if (BitfieldSize.isInvalid())
+      SkipUntil(tok::comma, StopAtSemi | StopBeforeMatch);
+  } else
+    ParseOptionalCXX11VirtSpecifierSeq(VS, getCurrentClass().IsInterface);
+
+  // If a simple-asm-expr is present, parse it.
+  if (Tok.is(tok::kw_asm)) {
+    SourceLocation Loc;
+    ExprResult AsmLabel(ParseSimpleAsm(&Loc));
+    if (AsmLabel.isInvalid())
+      SkipUntil(tok::comma, StopAtSemi | StopBeforeMatch);
+
+    DeclaratorInfo.setAsmLabel(AsmLabel.release());
+    DeclaratorInfo.SetRangeEnd(Loc);
+  }
+
+  // If attributes exist after the declarator, but before an '{', parse them.
+  MaybeParseGNUAttributes(DeclaratorInfo, &LateParsedAttrs);
+
+  // For compatibility with code written to older Clang, also accept a
+  // virt-specifier *after* the GNU attributes.
+  // FIXME: If we saw any attributes that are known to GCC followed by a
+  // virt-specifier, issue a GCC-compat warning.
+  if (BitfieldSize.isUnset() && VS.isUnset())
+    ParseOptionalCXX11VirtSpecifierSeq(VS, getCurrentClass().IsInterface);
+}
+
 /// ParseCXXClassMemberDeclaration - Parse a C++ class member declaration.
 ///
 ///       member-declaration:
@@ -2005,10 +2060,6 @@ void Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
                                           TemplateInfo, TemplateDiags);
   }
 
-  // Don't parse FOO:BAR as if it were a typo for FOO::BAR, in this context it
-  // is a bitfield.
-  ColonProtectionRAIIObject X(*this);
-
   ParsedAttributesWithRange attrs(AttrFactory);
   ParsedAttributesWithRange FnAttrs(AttrFactory);
   // Optional C++11 attribute-specifier
@@ -2047,8 +2098,14 @@ void Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   DS.takeAttributesFrom(attrs);
   if (MalformedTypeSpec)
     DS.SetTypeSpecError();
-  ParseDeclarationSpecifiers(DS, TemplateInfo, AS, DSC_class,
-                             &CommonLateParsedAttrs);
+
+  {
+    // Don't parse FOO:BAR as if it were a typo for FOO::BAR, in this context it
+    // is a bitfield.
+    ColonProtectionRAIIObject X(*this);
+    ParseDeclarationSpecifiers(DS, TemplateInfo, AS, DSC_class,
+                               &CommonLateParsedAttrs);
+  }
 
   // If we had a free-standing type definition with a missing semicolon, we
   // may get this far before the problem becomes obvious.
@@ -2081,29 +2138,30 @@ void Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   SourceLocation EqualLoc;
   bool HasInitializer = false;
   ExprResult Init;
-  if (Tok.isNot(tok::colon)) {
-    // Don't parse FOO:BAR as if it were a typo for FOO::BAR.
-    ColonProtectionRAIIObject X(*this);
 
-    // Parse the first declarator.
-    ParseDeclarator(DeclaratorInfo);
-    // Error parsing the declarator?
-    if (!DeclaratorInfo.hasName()) {
-      // If so, skip until the semi-colon or a }.
-      SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
-      TryConsumeToken(tok::semi);
-      return;
-    }
+  SmallVector<Decl *, 8> DeclsInGroup;
+  ExprResult BitfieldSize;
+  bool ExpectSemi = true;
 
-    ParseOptionalCXX11VirtSpecifierSeq(VS, getCurrentClass().IsInterface);
+  // Parse the first declarator.
+  ParseCXXMemberDeclaratorBeforeInitializer(DeclaratorInfo, VS, BitfieldSize,
+                                            LateParsedAttrs);
 
-    // If attributes exist after the declarator, but before an '{', parse them.
-    MaybeParseGNUAttributes(DeclaratorInfo, &LateParsedAttrs);
+  // If this has neither a name nor a bit width, something has gone seriously
+  // wrong. Skip until the semi-colon or }.
+  if (!DeclaratorInfo.hasName() && BitfieldSize.isUnset()) {
+    // If so, skip until the semi-colon or a }.
+    SkipUntil(tok::r_brace, StopAtSemi | StopBeforeMatch);
+    TryConsumeToken(tok::semi);
+    return;
+  }
 
-    // MSVC permits pure specifier on inline functions declared at class scope.
+  // Check for a member function definition.
+  if (BitfieldSize.isUnset()) {
+    // MSVC permits pure specifier on inline functions defined at class scope.
     // Hence check for =0 before checking for function definition.
     if (getLangOpts().MicrosoftExt && Tok.is(tok::equal) &&
-        DeclaratorInfo.isFunctionDeclarator() && 
+        DeclaratorInfo.isFunctionDeclarator() &&
         NextToken().is(tok::numeric_constant)) {
       EqualLoc = ConsumeToken();
       Init = ParseInitializer();
@@ -2188,39 +2246,7 @@ void Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
   //   member-declarator
   //   member-declarator-list ',' member-declarator
 
-  SmallVector<Decl *, 8> DeclsInGroup;
-  ExprResult BitfieldSize;
-  bool ExpectSemi = true;
-
   while (1) {
-    // member-declarator:
-    //   declarator pure-specifier[opt]
-    //   declarator brace-or-equal-initializer[opt]
-    //   identifier[opt] ':' constant-expression
-    if (TryConsumeToken(tok::colon)) {
-      BitfieldSize = ParseConstantExpression();
-      if (BitfieldSize.isInvalid())
-        SkipUntil(tok::comma, StopAtSemi | StopBeforeMatch);
-    }
-
-    // If a simple-asm-expr is present, parse it.
-    if (Tok.is(tok::kw_asm)) {
-      SourceLocation Loc;
-      ExprResult AsmLabel(ParseSimpleAsm(&Loc));
-      if (AsmLabel.isInvalid())
-        SkipUntil(tok::comma, StopAtSemi | StopBeforeMatch);
- 
-      DeclaratorInfo.setAsmLabel(AsmLabel.release());
-      DeclaratorInfo.SetRangeEnd(Loc);
-    }
-
-    // If attributes exist after the declarator, parse them.
-    MaybeParseGNUAttributes(DeclaratorInfo, &LateParsedAttrs);
-
-    // FIXME: When g++ adds support for this, we'll need to check whether it
-    // goes before or after the GNU attributes and __asm__.
-    ParseOptionalCXX11VirtSpecifierSeq(VS, getCurrentClass().IsInterface);
-
     InClassInitStyle HasInClassInit = ICIS_NoInit;
     if ((Tok.is(tok::equal) || Tok.is(tok::l_brace)) && !HasInitializer) {
       if (BitfieldSize.get()) {
@@ -2241,22 +2267,18 @@ void Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
 
     NamedDecl *ThisDecl = 0;
     if (DS.isFriendSpecified()) {
-      // C++11 [dcl.attr.grammar] p4: If an attribute-specifier-seq appertains 
+      // C++11 [dcl.attr.grammar] p4: If an attribute-specifier-seq appertains
       // to a friend declaration, that declaration shall be a definition.
       //
-      // Diagnose attributes appear after friend member function declarator:
-      // foo [[]] ();
+      // Diagnose attributes that appear in a friend member function declarator:
+      //   friend int foo [[]] ();
       SmallVector<SourceRange, 4> Ranges;
       DeclaratorInfo.getCXX11AttributeRanges(Ranges);
-      if (!Ranges.empty()) {
-        for (SmallVectorImpl<SourceRange>::iterator I = Ranges.begin(),
-             E = Ranges.end(); I != E; ++I) {
-          Diag((*I).getBegin(), diag::err_attributes_not_allowed) 
-            << *I;
-        }
-      }
+      for (SmallVectorImpl<SourceRange>::iterator I = Ranges.begin(),
+           E = Ranges.end(); I != E; ++I)
+        Diag((*I).getBegin(), diag::err_attributes_not_allowed) << *I;
 
-      // TODO: handle initializers, bitfields, 'delete'
+      // TODO: handle initializers, VS, bitfields, 'delete'
       ThisDecl = Actions.ActOnFriendFunctionDecl(getCurScope(), DeclaratorInfo,
                                                  TemplateParams);
     } else {
@@ -2360,11 +2382,11 @@ void Parser::ParseCXXClassMemberDeclaration(AccessSpecifier AS,
     HasInitializer = false;
     DeclaratorInfo.setCommaLoc(CommaLoc);
 
-    // Attributes are only allowed on the second declarator.
+    // GNU attributes are allowed before the second and subsequent declarator.
     MaybeParseGNUAttributes(DeclaratorInfo);
 
-    if (Tok.isNot(tok::colon))
-      ParseDeclarator(DeclaratorInfo);
+    ParseCXXMemberDeclaratorBeforeInitializer(DeclaratorInfo, VS, BitfieldSize,
+                                              LateParsedAttrs);
   }
 
   if (ExpectSemi &&

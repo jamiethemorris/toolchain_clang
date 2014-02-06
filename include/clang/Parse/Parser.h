@@ -1788,6 +1788,7 @@ private:
   /// disambiguation will occur.
   enum TentativeCXXTypeIdContext {
     TypeIdInParens,
+    TypeIdUnambiguous,
     TypeIdAsTemplateArgument
   };
 
@@ -1804,6 +1805,16 @@ private:
   bool isTypeIdInParens() {
     bool isAmbiguous;
     return isTypeIdInParens(isAmbiguous);
+  }
+
+  /// \brief Checks if the current tokens form type-id or expression.
+  /// It is similar to isTypeIdInParens but does not suppose that type-id
+  /// is in parenthesis.
+  bool isTypeIdUnambiguously() {
+    bool IsAmbiguous;
+    if (getLangOpts().CPlusPlus)
+      return isCXXTypeId(TypeIdUnambiguous, IsAmbiguous);
+    return isTypeSpecifierQualifier();
   }
 
   /// isCXXDeclarationStatement - C++-specialized function that disambiguates
@@ -2042,7 +2053,7 @@ private:
   void ParseMicrosoftInheritanceClassAttributes(ParsedAttributes &attrs);
   void ParseBorlandTypeAttributes(ParsedAttributes &attrs);
   void ParseOpenCLAttributes(ParsedAttributes &attrs);
-  void ParseOpenCLQualifiers(DeclSpec &DS);
+  void ParseOpenCLQualifiers(ParsedAttributes &Attrs);
 
   VersionTuple ParseVersionTuple(SourceRange &Range);
   void ParseAvailabilityAttribute(IdentifierInfo &Availability,
@@ -2054,8 +2065,6 @@ private:
                                        SourceLocation ObjCBridgeRelatedLoc,
                                        ParsedAttributes &attrs,
                                        SourceLocation *endLoc);
-
-  bool IsThreadSafetyAttribute(StringRef AttrName);
 
   void ParseTypeTagForDatatypeAttribute(IdentifierInfo &AttrName,
                                         SourceLocation AttrNameLoc,
@@ -2213,6 +2222,10 @@ private:
                                    Decl *TagDecl);
   ExprResult ParseCXXMemberInitializer(Decl *D, bool IsFunction,
                                        SourceLocation &EqualLoc);
+  void ParseCXXMemberDeclaratorBeforeInitializer(Declarator &DeclaratorInfo,
+                                                 VirtSpecifiers &VS,
+                                                 ExprResult &BitfieldSize,
+                                                 LateParsedAttrList &LateAttrs);
   void ParseCXXClassMemberDeclaration(AccessSpecifier AS, AttributeList *Attr,
                 const ParsedTemplateInfo &TemplateInfo = ParsedTemplateInfo(),
                                  ParsingDeclRAIIObject *DiagsFromTParams = 0);

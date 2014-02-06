@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -fno-rtti -emit-llvm-only -triple i686-pc-win32 -fdump-record-layouts -fsyntax-only -cxx-abi microsoft %s 2>/dev/null \
+// RUN: %clang_cc1 -fno-rtti -emit-llvm-only -triple i686-pc-win32 -fdump-record-layouts -fsyntax-only %s 2>/dev/null \
 // RUN:            | FileCheck %s
-// RUN: %clang_cc1 -fno-rtti -emit-llvm-only -triple x86_64-pc-win32 -fdump-record-layouts -fsyntax-only -cxx-abi microsoft %s 2>/dev/null \
+// RUN: %clang_cc1 -fno-rtti -emit-llvm-only -triple x86_64-pc-win32 -fdump-record-layouts -fsyntax-only %s 2>/dev/null \
 // RUN:            | FileCheck %s -check-prefix CHECK-X64
 
 extern "C" int printf(const char *fmt, ...);
@@ -255,10 +255,54 @@ struct F : virtual D, virtual B {};
 // CHECK-X64-NEXT:      | [sizeof=32, align=8
 // CHECK-X64-NEXT:      |  nvsize=8, nvalign=8]
 
+struct JC0 {
+	JC0() { printf("JC0 : %d\n", (int)((char*)this - buffer)); }
+};
+struct JC1 : JC0 {
+	virtual void f() {}
+	JC1() { printf("JC1 : %d\n", (int)((char*)this - buffer)); }
+};
+struct JC2 : JC1 {
+	JC2() { printf("JC2 : %d\n", (int)((char*)this - buffer)); }
+};
+struct JC4 : JC1, JC2 {
+	JC4() { printf("JC4 : %d\n", (int)((char*)this - buffer)); }
+};
+
+// CHECK: *** Dumping AST Record Layout
+// CHECK: *** Dumping AST Record Layout
+// CHECK: *** Dumping AST Record Layout
+// CHECK: *** Dumping AST Record Layout
+// CHECK-NEXT:    0 | struct JC4
+// CHECK-NEXT:    0 |   struct JC1 (primary base)
+// CHECK-NEXT:    0 |     (JC1 vftable pointer)
+// CHECK-NEXT:    4 |     struct JC0 (base) (empty)
+// CHECK-NEXT:    8 |   struct JC2 (base)
+// CHECK-NEXT:    8 |     struct JC1 (primary base)
+// CHECK-NEXT:    8 |       (JC1 vftable pointer)
+// CHECK-NEXT:   12 |       struct JC0 (base) (empty)
+// CHECK-NEXT:      | [sizeof=12, align=4
+// CHECK-NEXT:      |  nvsize=12, nvalign=4]
+// CHECK-X64: *** Dumping AST Record Layout
+// CHECK-X64: *** Dumping AST Record Layout
+// CHECK-X64: *** Dumping AST Record Layout
+// CHECK-X64: *** Dumping AST Record Layout
+// CHECK-X64-NEXT:    0 | struct JC4
+// CHECK-X64-NEXT:    0 |   struct JC1 (primary base)
+// CHECK-X64-NEXT:    0 |     (JC1 vftable pointer)
+// CHECK-X64-NEXT:    8 |     struct JC0 (base) (empty)
+// CHECK-X64-NEXT:   16 |   struct JC2 (base)
+// CHECK-X64-NEXT:   16 |     struct JC1 (primary base)
+// CHECK-X64-NEXT:   16 |       (JC1 vftable pointer)
+// CHECK-X64-NEXT:   24 |       struct JC0 (base) (empty)
+// CHECK-X64-NEXT:      | [sizeof=24, align=8
+// CHECK-X64-NEXT:      |  nvsize=24, nvalign=8]
+
 int a[
 sizeof(AT3) +
 sizeof(BT3) +
 sizeof(T3) +
 sizeof(E) +
 sizeof(F) +
+sizeof(JC4) +
 0];

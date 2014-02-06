@@ -296,7 +296,6 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
     State.Stack.back().LastSpace = State.Column;
   else if ((Previous.Type == TT_BinaryOperator ||
             Previous.Type == TT_ConditionalExpr ||
-            Previous.Type == TT_UnaryOperator ||
             Previous.Type == TT_CtorInitializerColon) &&
            (Previous.getPrecedence() != prec::Assignment ||
             Current.StartsBinaryExpression))
@@ -384,7 +383,8 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
   } else if (Previous.is(tok::comma) && State.Stack.back().VariablePos != 0) {
     State.Column = State.Stack.back().VariablePos;
   } else if ((PreviousNonComment &&
-              PreviousNonComment->ClosesTemplateDeclaration) ||
+              (PreviousNonComment->ClosesTemplateDeclaration ||
+               PreviousNonComment->Type == TT_AttributeParen)) ||
              ((Current.Type == TT_StartOfName ||
                Current.is(tok::kw_operator)) &&
               State.ParenLevel == 0 &&
@@ -467,8 +467,6 @@ unsigned ContinuationIndenter::addTokenOnNewLine(LineState &State,
 
   if (!Current.isTrailingComment())
     State.Stack.back().LastSpace = State.Column;
-  if (Current.isMemberAccess())
-    State.Stack.back().LastSpace += Current.ColumnWidth;
   State.StartOfLineLevel = State.ParenLevel;
   State.LowestLevelOnLine = State.ParenLevel;
 
@@ -813,7 +811,6 @@ unsigned ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
         Current.Previous->is(tok::at)) {
       IsNSStringLiteral = true;
       Prefix = "@\"";
-      --StartColumn;
     }
     if ((Text.endswith(Postfix = "\"") &&
          (IsNSStringLiteral || Text.startswith(Prefix = "\"") ||

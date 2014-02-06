@@ -452,8 +452,6 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SanitizerBlacklistFile = Args.getLastArgValue(OPT_fsanitize_blacklist);
   Opts.SanitizeMemoryTrackOrigins =
     Args.hasArg(OPT_fsanitize_memory_track_origins);
-  Opts.SanitizeAddressZeroBaseShadow =
-    Args.hasArg(OPT_fsanitize_address_zero_base_shadow);
   Opts.SanitizeUndefinedTrapOnError =
     Args.hasArg(OPT_fsanitize_undefined_trap_on_error);
   Opts.SSPBufferSize =
@@ -702,6 +700,8 @@ static InputKind ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
       Opts.ProgramAction = frontend::ParseSyntaxOnly; break;
     case OPT_module_file_info:
       Opts.ProgramAction = frontend::ModuleFileInfo; break;
+    case OPT_verify_pch:
+      Opts.ProgramAction = frontend::VerifyPCH; break;
     case OPT_print_decl_contexts:
       Opts.ProgramAction = frontend::PrintDeclContext; break;
     case OPT_print_preamble:
@@ -1307,9 +1307,8 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
                                    OPT_fno_dollars_in_identifiers,
                                    Opts.DollarIdents);
   Opts.PascalStrings = Args.hasArg(OPT_fpascal_strings);
-  Opts.MicrosoftExt
-    = Args.hasArg(OPT_fms_extensions) || Args.hasArg(OPT_fms_compatibility);
-  Opts.MicrosoftMode = Args.hasArg(OPT_fms_compatibility);
+  Opts.MSVCCompat = Args.hasArg(OPT_fms_compatibility);
+  Opts.MicrosoftExt = Opts.MSVCCompat || Args.hasArg(OPT_fms_extensions);
   Opts.AsmBlocks = Args.hasArg(OPT_fasm_blocks) || Opts.MicrosoftExt;
   Opts.MSCVersion = getLastArgIntValue(Args, OPT_fmsc_version, 0, Diags);
   Opts.Borland = Args.hasArg(OPT_fborland_extensions);
@@ -1596,6 +1595,7 @@ static void ParsePreprocessorOutputArgs(PreprocessorOutputOptions &Opts,
   case frontend::GeneratePTH:
   case frontend::ParseSyntaxOnly:
   case frontend::ModuleFileInfo:
+  case frontend::VerifyPCH:
   case frontend::PluginAction:
   case frontend::PrintDeclContext:
   case frontend::RewriteObjC:
@@ -1626,7 +1626,6 @@ static void ParsePreprocessorOutputArgs(PreprocessorOutputOptions &Opts,
 static void ParseTargetArgs(TargetOptions &Opts, ArgList &Args) {
   using namespace options;
   Opts.ABI = Args.getLastArgValue(OPT_target_abi);
-  Opts.CXXABI = Args.getLastArgValue(OPT_cxx_abi);
   Opts.CPU = Args.getLastArgValue(OPT_target_cpu);
   Opts.FPMath = Args.getLastArgValue(OPT_mfpmath);
   Opts.FeaturesAsWritten = Args.getAllArgValues(OPT_target_feature);
@@ -1637,8 +1636,6 @@ static void ParseTargetArgs(TargetOptions &Opts, ArgList &Args) {
   if (Opts.Triple.empty())
     Opts.Triple = llvm::sys::getDefaultTargetTriple();
 }
-
-//
 
 bool CompilerInvocation::CreateFromArgs(CompilerInvocation &Res,
                                         const char *const *ArgBegin,
@@ -1773,8 +1770,7 @@ std::string CompilerInvocation::getModuleHash() const {
   
   // Extend the signature with the target options.
   code = hash_combine(code, TargetOpts->Triple, TargetOpts->CPU,
-                      TargetOpts->ABI, TargetOpts->CXXABI,
-                      TargetOpts->LinkerVersion);
+                      TargetOpts->ABI, TargetOpts->LinkerVersion);
   for (unsigned i = 0, n = TargetOpts->FeaturesAsWritten.size(); i != n; ++i)
     code = hash_combine(code, TargetOpts->FeaturesAsWritten[i]);
 

@@ -29,12 +29,8 @@
 using namespace clang;
 using namespace CodeGen;
 
-CodeGenVTables::CodeGenVTables(CodeGenModule &CGM) : CGM(CGM) {
-  if (CGM.getTarget().getCXXABI().isMicrosoft())
-    VTContext.reset(new MicrosoftVTableContext(CGM.getContext()));
-  else
-    VTContext.reset(new ItaniumVTableContext(CGM.getContext()));
-}
+CodeGenVTables::CodeGenVTables(CodeGenModule &CGM)
+    : CGM(CGM), VTContext(CGM.getContext().getVTableContext()) {}
 
 llvm::Constant *CodeGenModule::GetAddrOfThunk(GlobalDecl GD, 
                                               const ThunkInfo &Thunk) {
@@ -175,7 +171,7 @@ void CodeGenFunction::GenerateVarArgsThunk(
                                       GlobalDecl GD, const ThunkInfo &Thunk) {
   const CXXMethodDecl *MD = cast<CXXMethodDecl>(GD.getDecl());
   const FunctionProtoType *FPT = MD->getType()->getAs<FunctionProtoType>();
-  QualType ResultType = FPT->getResultType();
+  QualType ResultType = FPT->getReturnType();
 
   // Get the original function
   assert(FnInfo.isVariadic());
@@ -246,7 +242,7 @@ void CodeGenFunction::StartThunk(llvm::Function *Fn, GlobalDecl GD,
   QualType ThisType = MD->getThisType(getContext());
   const FunctionProtoType *FPT = MD->getType()->getAs<FunctionProtoType>();
   QualType ResultType =
-    CGM.getCXXABI().HasThisReturn(GD) ? ThisType : FPT->getResultType();
+      CGM.getCXXABI().HasThisReturn(GD) ? ThisType : FPT->getReturnType();
   FunctionArgList FunctionArgs;
 
   // Create the implicit 'this' parameter declaration.
@@ -317,7 +313,7 @@ void CodeGenFunction::EmitCallAndReturnForThunk(GlobalDecl GD,
 
   // Determine whether we have a return value slot to use.
   QualType ResultType =
-    CGM.getCXXABI().HasThisReturn(GD) ? ThisType : FPT->getResultType();
+      CGM.getCXXABI().HasThisReturn(GD) ? ThisType : FPT->getReturnType();
   ReturnValueSlot Slot;
   if (!ResultType->isVoidType() &&
       CurFnInfo->getReturnInfo().getKind() == ABIArgInfo::Indirect &&
