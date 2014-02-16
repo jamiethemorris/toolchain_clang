@@ -99,6 +99,11 @@ class VersionArgument<string name, bit opt = 0> : Argument<name, opt>;
 // be dependent.
 class AlignedArgument<string name, bit opt = 0> : Argument<name, opt>;
 
+// A bool argument with a default value
+class DefaultBoolArgument<string name, bit default> : BoolArgument<name, 1> {
+  bit Default = default;
+}
+
 // An integer argument with a default value
 class DefaultIntArgument<string name, int default> : IntArgument<name, 1> {
   int Default = default;
@@ -359,8 +364,7 @@ def Bounded : IgnoredAttr {
 }
 
 def CarriesDependency : InheritableParamAttr {
-  let Spellings = [GNU<"carries_dependency">, CXX11<"","carries_dependency">,
-                   CXX11<"std","carries_dependency">];
+  let Spellings = [GNU<"carries_dependency">, CXX11<"","carries_dependency">];
   let Subjects = SubjectList<[ParmVar, ObjCMethod, Function], ErrorDiag>;
 }
 
@@ -475,7 +479,7 @@ def C11NoReturn : InheritableAttr {
 }
 
 def CXX11NoReturn : InheritableAttr {
-  let Spellings = [CXX11<"","noreturn">, CXX11<"std","noreturn">];
+  let Spellings = [CXX11<"","noreturn">];
   let Subjects = SubjectList<[Function], ErrorDiag>;
 }
 
@@ -1397,6 +1401,7 @@ def UPtr : TypeAttr {
 
 def MSInheritance : InheritableAttr {
   let LangOpts = [MicrosoftExt];
+  let Args = [DefaultBoolArgument<"BestCase", 1>];
   let Spellings = [Keyword<"__single_inheritance">,
                    Keyword<"__multiple_inheritance">,
                    Keyword<"__virtual_inheritance">,
@@ -1422,6 +1427,23 @@ def MSInheritance : InheritableAttr {
       return Inheritance <= Keyword_single_inheritance;
     return Inheritance <= Keyword_multiple_inheritance;
   }
+  }];
+}
+
+def MSVtorDisp : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let Args = [UnsignedArgument<"vdm">];
+  let SemaHandler = 0;
+
+  let AdditionalMembers = [{
+  enum Mode {
+    Never,
+    ForVBaseOverride,
+    ForVFTable
+  };
+
+  Mode getVtorDispMode() const { return Mode(vdm); }
   }];
 }
 

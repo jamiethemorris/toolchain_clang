@@ -1000,7 +1000,7 @@ TEST(Matcher, Call) {
 }
 
 TEST(Matcher, Lambda) {
-  EXPECT_TRUE(matches("auto f = [&] (int i) { return i; };",
+  EXPECT_TRUE(matches("auto f = [] (int i) { return i; };",
                       lambdaExpr()));
 }
 
@@ -1038,7 +1038,7 @@ TEST(HasType, MatchesAsString) {
   EXPECT_TRUE(matches("namespace ns { struct A {}; }  struct B { ns::A a; };",
       fieldDecl(hasType(asString("ns::A")))));
   EXPECT_TRUE(matches("namespace { struct A {}; }  struct B { A a; };",
-      fieldDecl(hasType(asString("struct <anonymous>::A")))));
+      fieldDecl(hasType(asString("struct <anonymous namespace>::A")))));
 }
 
 TEST(Matcher, OverloadedOperatorCall) {
@@ -1635,6 +1635,17 @@ TEST(Matcher, ConstructorArgumentCount) {
   EXPECT_TRUE(
       notMatches("class X { public: X(int, int); }; void x() { X x(0, 0); }",
                  Constructor1Arg));
+}
+
+TEST(Matcher, ConstructorListInitialization) {
+  StatementMatcher ConstructorListInit = constructExpr(isListInitialization());
+
+  EXPECT_TRUE(
+      matches("class X { public: X(int); }; void x() { X x{0}; }",
+              ConstructorListInit));
+  EXPECT_FALSE(
+      matches("class X { public: X(int); }; void x() { X x(0); }",
+              ConstructorListInit));
 }
 
 TEST(Matcher,ThisExpr) {

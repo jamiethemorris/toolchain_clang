@@ -1170,23 +1170,6 @@ static bool attrNonNullArgCheck(Sema &S, QualType T, const AttributeList &Attr,
   return true;
 }
 
-static void handleNonNullAttrParameter(Sema &S, ParmVarDecl *D,
-                                       const AttributeList &Attr) {
-  // Is the argument a pointer type?
-  if (!attrNonNullArgCheck(S, D->getType(), Attr, D->getSourceRange()))
-    return;
-
-  if (Attr.getNumArgs() > 0) {
-    S.Diag(Attr.getLoc(), diag::warn_attribute_nonnull_parm_no_args)
-      << D->getSourceRange();
-    return;
-  }
-
-  D->addAttr(::new (S.Context)
-             NonNullAttr(Attr.getRange(), S.Context, 0, 0,
-                         Attr.getAttributeSpellingListIndex()));
-}
-
 static void handleNonNullAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   SmallVector<unsigned, 8> NonNullArgs;
   for (unsigned i = 0; i < Attr.getNumArgs(); ++i) {
@@ -1229,6 +1212,27 @@ static void handleNonNullAttr(Sema &S, Decl *D, const AttributeList &Attr) {
   llvm::array_pod_sort(start, start + size);
   D->addAttr(::new (S.Context)
              NonNullAttr(Attr.getRange(), S.Context, start, size,
+                         Attr.getAttributeSpellingListIndex()));
+}
+
+static void handleNonNullAttrParameter(Sema &S, ParmVarDecl *D,
+                                       const AttributeList &Attr) {
+  if (Attr.getNumArgs() > 0) {
+    if (D->getFunctionType()) {
+      handleNonNullAttr(S, D, Attr);
+    } else {
+      S.Diag(Attr.getLoc(), diag::warn_attribute_nonnull_parm_no_args)
+        << D->getSourceRange();
+    }
+    return;
+  }
+
+  // Is the argument a pointer type?
+  if (!attrNonNullArgCheck(S, D->getType(), Attr, D->getSourceRange()))
+    return;
+
+  D->addAttr(::new (S.Context)
+             NonNullAttr(Attr.getRange(), S.Context, 0, 0,
                          Attr.getAttributeSpellingListIndex()));
 }
 
@@ -2810,14 +2814,12 @@ void Sema::AddAlignedAttr(SourceRange AttrRange, Decl *D, Expr *E,
     return;
   }
 
-  if (TmpAttr.isDeclspec()) {
-    // We've already verified it's a power of 2, now let's make sure it's
-    // 8192 or less.
-    if (Alignment.getZExtValue() > 8192) {
-      Diag(AttrLoc, diag::err_attribute_aligned_greater_than_8192)
-        << E->getSourceRange();
-      return;
-    }
+  // Alignment calculations can wrap around if it's greater than 2**28.
+  unsigned MaxValidAlignment = TmpAttr.isDeclspec() ? 8192 : 268435456;
+  if (Alignment.getZExtValue() > MaxValidAlignment) {
+    Diag(AttrLoc, diag::err_attribute_aligned_too_great) << MaxValidAlignment
+                                                         << E->getSourceRange();
+    return;
   }
 
   AlignedAttr *AA = ::new (Context) AlignedAttr(AttrRange, Context, true,
@@ -2873,20 +2875,32 @@ void Sema::CheckAlignasUnderalignment(Decl *D) {
 }
 
 bool Sema::checkMSInheritanceAttrOnDefinition(
-    CXXRecordDecl *RD, SourceRange Range,
+    CXXRecordDecl *RD, SourceRange Range, bool BestCase,
     MSInheritanceAttr::Spelling SemanticSpelling) {
   assert(RD->hasDefinition() && "RD has no definition!");
 
-  if (SemanticSpelling != MSInheritanceAttr::Keyword_unspecified_inheritance &&
-      RD->calculateInheritanceModel() != SemanticSpelling) {
-    Diag(Range.getBegin(), diag::err_mismatched_ms_inheritance)
-        << 0 /*definition*/;
-    Diag(RD->getDefinition()->getLocation(), diag::note_defined_here)
-        << RD->getNameAsString();
-    return true;
+  // We may not have seen base specifiers or any virtual methods yet.  We will
+  // have to wait until the record is defined to catch any mismatches.
+  if (!RD->getDefinition()->isCompleteDefinition())
+    return false;
+
+  // The unspecified model never matches what a definition could need.
+  if (SemanticSpelling == MSInheritanceAttr::Keyword_unspecified_inheritance)
+    return false;
+
+  if (BestCase) {
+    if (RD->calculateInheritanceModel() == SemanticSpelling)
+      return false;
+  } else {
+    if (RD->calculateInheritanceModel() <= SemanticSpelling)
+      return false;
   }
 
-  return false;
+  Diag(Range.getBegin(), diag::err_mismatched_ms_inheritance)
+      << 0 /*definition*/;
+  Diag(RD->getDefinition()->getLocation(), diag::note_defined_here)
+      << RD->getNameAsString();
+  return true;
 }
 
 /// handleModeAttr - This attribute modifies the width of a decl with primitive
@@ -3698,7 +3712,8 @@ static void handleMSInheritanceAttr(Sema &S, Decl *D, const AttributeList &Attr)
     return;
   }
   MSInheritanceAttr *IA = S.mergeMSInheritanceAttr(
-      D, Attr.getRange(), Attr.getAttributeSpellingListIndex(),
+      D, Attr.getRange(), /*BestCase=*/true,
+      Attr.getAttributeSpellingListIndex(),
       (MSInheritanceAttr::Spelling)Attr.getSemanticSpelling());
   if (IA)
     D->addAttr(IA);
@@ -3879,7 +3894,7 @@ static void handleDLLExportAttr(Sema &S, Decl *D, const AttributeList &Attr) {
 }
 
 MSInheritanceAttr *
-Sema::mergeMSInheritanceAttr(Decl *D, SourceRange Range,
+Sema::mergeMSInheritanceAttr(Decl *D, SourceRange Range, bool BestCase,
                              unsigned AttrSpellingListIndex,
                              MSInheritanceAttr::Spelling SemanticSpelling) {
   if (MSInheritanceAttr *IA = D->getAttr<MSInheritanceAttr>()) {
@@ -3893,7 +3908,8 @@ Sema::mergeMSInheritanceAttr(Decl *D, SourceRange Range,
 
   CXXRecordDecl *RD = cast<CXXRecordDecl>(D);
   if (RD->hasDefinition()) {
-    if (checkMSInheritanceAttrOnDefinition(RD, Range, SemanticSpelling)) {
+    if (checkMSInheritanceAttrOnDefinition(RD, Range, BestCase,
+                                           SemanticSpelling)) {
       return 0;
     }
   } else {
@@ -3910,7 +3926,7 @@ Sema::mergeMSInheritanceAttr(Decl *D, SourceRange Range,
   }
 
   return ::new (Context)
-      MSInheritanceAttr(Range, Context, AttrSpellingListIndex);
+      MSInheritanceAttr(Range, Context, BestCase, AttrSpellingListIndex);
 }
 
 /// Handles semantic checking for features that are common to all attributes,
