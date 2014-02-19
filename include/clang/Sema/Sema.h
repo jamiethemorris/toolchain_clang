@@ -1521,7 +1521,6 @@ public:
                                      MultiTemplateParamsArg TemplateParamLists,
                                      bool &AddToScope);
   bool AddOverriddenMethods(CXXRecordDecl *DC, CXXMethodDecl *MD);
-  void checkVoidParamDecl(ParmVarDecl *Param);
 
   bool CheckConstexprFunctionDecl(const FunctionDecl *FD);
   bool CheckConstexprFunctionBody(const FunctionDecl *FD, Stmt *Body);
@@ -4661,8 +4660,7 @@ public:
   //
   Decl *ActOnStartLinkageSpecification(Scope *S,
                                        SourceLocation ExternLoc,
-                                       SourceLocation LangLoc,
-                                       StringRef Lang,
+                                       Expr *LangStr,
                                        SourceLocation LBraceLoc);
   Decl *ActOnFinishLinkageSpecification(Scope *S,
                                         Decl *LinkageSpec,
@@ -7889,6 +7887,7 @@ private:
 
   ExprResult CheckBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
 
+  bool CheckNeonBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckARMBuiltinExclusiveCall(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckARMBuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
   bool CheckAArch64BuiltinFunctionCall(unsigned BuiltinID, CallExpr *TheCall);
