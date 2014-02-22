@@ -2499,7 +2499,10 @@ def err_objc_bridged_related_invalid_class_name : Error<
 def err_objc_bridged_related_known_method : Error<
  "%0 must be explicitly converted to %1; use %select{%objcclass2|%objcinstance2}3 "
  "method for this conversion">;
-  
+
+def err_objc_attr_protocol_requires_definition : Error<
+  "attribute %0 can only be applied to @protocol definitions, not forward declarations">;
+
 // Function Parameter Semantic Analysis.
 def err_param_with_void_type : Error<"argument may not have 'void' type">;
 def err_void_only_param : Error<
@@ -5844,6 +5847,12 @@ def err_invalid_conversion_between_vector_and_integer : Error<
   "invalid conversion between vector type %0 and integer type %1 "
   "of different size">;
 
+def err_opencl_function_pointer_variable : Error<
+  "pointers to functions are not allowed">;
+
+def err_opencl_taking_function_address : Error<
+  "taking address of function is not allowed">;
+
 def err_invalid_conversion_between_vector_and_scalar : Error<
   "invalid conversion between vector type %0 and scalar type %1">;
 
@@ -6217,6 +6226,8 @@ def warn_format_string_is_wide_literal : Warning<
   "format string should not be a wide string">, InGroup<Format>;
 def warn_printf_format_string_contains_null_char : Warning<
   "format string contains '\\0' within the string body">, InGroup<Format>;
+def warn_printf_format_string_not_null_terminated : Warning<
+  "format string is not null-terminated">, InGroup<Format>;
 def warn_printf_asterisk_missing_arg : Warning<
   "'%select{*|.*}0' specified field %select{width|precision}0 is missing a matching 'int' argument">,
   InGroup<Format>;
