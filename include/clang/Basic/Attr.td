@@ -357,7 +357,7 @@ def AlignMac68k : InheritableAttr {
 }
 
 def AlwaysInline : InheritableAttr {
-  let Spellings = [GCC<"always_inline">];
+  let Spellings = [GCC<"always_inline">, Keyword<"__forceinline">];
   let Subjects = SubjectList<[Function]>;
   let Documentation = [Undocumented];
 }
@@ -801,6 +801,12 @@ def NoCommon : InheritableAttr {
 def NoDebug : InheritableAttr {
   let Spellings = [GNU<"nodebug">];
   let Documentation = [Undocumented];
+}
+
+def NoDuplicate : InheritableAttr {
+  let Spellings = [GNU<"noduplicate">, CXX11<"clang", "noduplicate">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [NoDuplicateDocs];
 }
 
 def NoInline : InheritableAttr {
@@ -1670,12 +1676,6 @@ def DLLImport : InheritableAttr, TargetSpecificAttr<TargetX86Win> {
   let Documentation = [Undocumented];
 }
 
-def ForceInline : InheritableAttr {
-  let Spellings = [Keyword<"__forceinline">];
-  let LangOpts = [MicrosoftExt];
-  let Documentation = [Undocumented];
-}
-
 def SelectAny : InheritableAttr {
   let Spellings = [Declspec<"selectany">];
   let LangOpts = [MicrosoftExt];
@@ -1736,7 +1736,7 @@ def MSInheritance : InheritableAttr {
     return Inheritance <= Keyword_multiple_inheritance;
   }
   }];
-  let Documentation = [Undocumented];
+  let Documentation = [MSInheritanceDocs];
 }
 
 def MSVtorDisp : InheritableAttr {
