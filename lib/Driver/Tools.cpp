@@ -3281,14 +3281,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
-  if (!Args.hasFlag(options::OPT_fglobal_ctor_const_promotion,
-                    options::OPT_fno_global_ctor_const_promotion,
-                    getToolChain().getTriple().getEnvironment() !=
-                    llvm::Triple::Android)) {
-    CmdArgs.push_back("-mllvm");
-    CmdArgs.push_back("-disable-global-ctor-const-promotion");
-  }
-
   if (Arg *A = Args.getLastArg(options::OPT_mrestrict_it,
                                options::OPT_mno_restrict_it)) {
     if (A->getOption().matches(options::OPT_mrestrict_it)) {
