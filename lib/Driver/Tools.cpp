@@ -667,10 +667,6 @@ StringRef tools::arm::getARMFloatABI(const Driver &D, const ArgList &Args,
         // EABI is always AAPCS, and if it was not marked 'hard', it's softfp
         FloatABI = "softfp";
         break;
-      case llvm::Triple::MachO: {
-        FloatABI = "soft";
-        break;
-      }
       case llvm::Triple::Android: {
         std::string ArchName =
           arm::getLLVMArchSuffixForARM(arm::getARMTargetCPU(Args, Triple));
@@ -683,6 +679,10 @@ StringRef tools::arm::getARMFloatABI(const Driver &D, const ArgList &Args,
       default:
         // Assume "soft", but warn the user we are guessing.
         FloatABI = "soft";
+        // *-macho defaults to "soft"
+        if (Triple.getOS() == llvm::Triple::UnknownOS &&
+            Triple.getObjectFormat() == llvm::Triple::MachO)
+          break;
         D.Diag(diag::warn_drv_assuming_mfloat_abi_is) << "soft";
         break;
       }
@@ -762,7 +762,8 @@ void Clang::AddARMTargetArgs(const ArgList &Args,
     // The backend is hardwired to assume AAPCS for M-class processors, ensure
     // the frontend matches that.
     if (Triple.getEnvironment() == llvm::Triple::EABI ||
-        Triple.getEnvironment() == llvm::Triple::MachO ||
+        (Triple.getOS() == llvm::Triple::UnknownOS &&
+         Triple.getObjectFormat() == llvm::Triple::MachO) ||
         StringRef(CPUName).startswith("cortex-m")) {
       ABIName = "aapcs";
     } else {
@@ -3399,6 +3400,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(Args.MakeArgString(DefaultModuleCache));
   }
 
+  if (Arg *A = Args.getLastArg(options::OPT_fmodules_user_build_path)) {
+    A->claim();
+    if (HaveModules) {
+      A->render(Args, CmdArgs);
+    }
+  }
+
   // Pass through all -fmodules-ignore-macro arguments.
   Args.AddAllArgs(CmdArgs, options::OPT_fmodules_ignore_macro);
   Args.AddLastArg(CmdArgs, options::OPT_fmodules_prune_interval);
@@ -4924,7 +4932,7 @@ void darwin::setTripleTypeForMachOArchName(llvm::Triple &T, StringRef Str) {
     T.setArchName(Str);
   else if (Str == "armv6m" || Str == "armv7m" || Str == "armv7em") {
     T.setOS(llvm::Triple::UnknownOS);
-    T.setEnvironment(llvm::Triple::MachO);
+    T.setObjectFormat(llvm::Triple::MachO);
   }
 }
 
@@ -5229,6 +5237,12 @@ void darwin::Link::AddLinkArgs(Compilation &C,
   Args.AddLastArg(CmdArgs, options::OPT_Mach);
 }
 
+enum LibOpenMP {
+  LibUnknown,
+  LibGOMP,
+  LibIOMP5
+};
+
 void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
                                 const InputInfo &Output,
                                 const InputInfoList &Inputs,
@@ -5280,9 +5294,28 @@ void darwin::Link::ConstructJob(Compilation &C, const JobAction &JA,
 
   Args.AddAllArgs(CmdArgs, options::OPT_L);
 
-  if (Args.hasArg(options::OPT_fopenmp))
-    // This is more complicated in gcc...
+  LibOpenMP UsedOpenMPLib = LibUnknown;
+  if (Args.hasArg(options::OPT_fopenmp)) {
+    UsedOpenMPLib = LibGOMP;
+  } else if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ)) {
+    UsedOpenMPLib = llvm::StringSwitch<LibOpenMP>(A->getValue())
+        .Case("libgomp",  LibGOMP)
+        .Case("libiomp5", LibIOMP5)
+        .Default(LibUnknown);
+    if (UsedOpenMPLib == LibUnknown)
+      getToolChain().getDriver().Diag(diag::err_drv_unsupported_option_argument)
+        << A->getOption().getName() << A->getValue();
+  }
+  switch (UsedOpenMPLib) {
+  case LibGOMP:
     CmdArgs.push_back("-lgomp");
+    break;
+  case LibIOMP5:
+    CmdArgs.push_back("-liomp5");
+    break;
+  case LibUnknown:
+    break;
+  }
 
   AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs);
   
@@ -6022,7 +6055,7 @@ void freebsd::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
   } else if (getToolChain().getArch() == llvm::Triple::arm ||
              getToolChain().getArch() == llvm::Triple::thumb) {
     const Driver &D = getToolChain().getDriver();
-    llvm::Triple Triple = getToolChain().getTriple();
+    const llvm::Triple &Triple = getToolChain().getTriple();
     StringRef FloatABI = arm::getARMFloatABI(D, Args, Triple);
 
     if (FloatABI == "hard") {
@@ -6630,7 +6663,7 @@ void gnutools::Assemble::ConstructJob(Compilation &C, const JobAction &JA,
                    SplitDebugName(Args, Inputs));
 }
 
-static void AddLibgcc(llvm::Triple Triple, const Driver &D,
+static void AddLibgcc(const llvm::Triple &Triple, const Driver &D,
                       ArgStringList &CmdArgs, const ArgList &Args) {
   bool isAndroid = Triple.getEnvironment() == llvm::Triple::Android;
   bool StaticLibgcc = Args.hasArg(options::OPT_static_libgcc) ||
@@ -6896,19 +6929,36 @@ void gnutools::Link::ConstructJob(Compilation &C, const JobAction &JA,
       if (Args.hasArg(options::OPT_static))
         CmdArgs.push_back("--start-group");
 
-      bool OpenMP = Args.hasArg(options::OPT_fopenmp);
-      if (OpenMP) {
+      LibOpenMP UsedOpenMPLib = LibUnknown;
+      if (Args.hasArg(options::OPT_fopenmp)) {
+        UsedOpenMPLib = LibGOMP;
+      } else if (const Arg *A = Args.getLastArg(options::OPT_fopenmp_EQ)) {
+        UsedOpenMPLib = llvm::StringSwitch<LibOpenMP>(A->getValue())
+            .Case("libgomp",  LibGOMP)
+            .Case("libiomp5", LibIOMP5)
+            .Default(LibUnknown);
+        if (UsedOpenMPLib == LibUnknown)
+          D.Diag(diag::err_drv_unsupported_option_argument)
+            << A->getOption().getName() << A->getValue();
+      }
+      switch (UsedOpenMPLib) {
+      case LibGOMP:
         CmdArgs.push_back("-lgomp");
 
         // FIXME: Exclude this for platforms with libgomp that don't require
         // librt. Most modern Linux platforms require it, but some may not.
         CmdArgs.push_back("-lrt");
+        break;
+      case LibIOMP5:
+        CmdArgs.push_back("-liomp5");
+        break;
+      case LibUnknown:
+        break;
       }
-
       AddRunTimeLibs(ToolChain, D, CmdArgs, Args);
 
       if (Args.hasArg(options::OPT_pthread) ||
-          Args.hasArg(options::OPT_pthreads) || OpenMP)
+          Args.hasArg(options::OPT_pthreads) || UsedOpenMPLib == LibGOMP)
         CmdArgs.push_back("-lpthread");
 
       CmdArgs.push_back("-lc");

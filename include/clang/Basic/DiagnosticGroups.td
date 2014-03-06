@@ -41,6 +41,7 @@ def SignConversion : DiagGroup<"sign-conversion">;
 def BoolConversion : DiagGroup<"bool-conversion">;
 def IntConversion : DiagGroup<"int-conversion">;
 def EnumConversion : DiagGroup<"enum-conversion">;
+def EnumTooLarge : DiagGroup<"enum-too-large">;
 def NonLiteralNullConversion : DiagGroup<"non-literal-null-conversion">;
 def NullConversion : DiagGroup<"null-conversion">;
 def ImplicitConversionFloatingPointToBool :
@@ -637,3 +638,4 @@ def SourceUsesOpenMP : DiagGroup<"source-uses-openmp">;
 def BackendInlineAsm : DiagGroup<"inline-asm">;
 def BackendFrameLargerThan : DiagGroup<"frame-larger-than">;
 def BackendPlugin : DiagGroup<"backend-plugin">;
+def RemarkBackendPlugin : DiagGroup<"remark-backend-plugin">;

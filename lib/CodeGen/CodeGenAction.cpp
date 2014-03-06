@@ -26,7 +26,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IRReader/IRReader.h"
-#include "llvm/Linker.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
@@ -307,6 +307,27 @@ void BackendConsumer::InlineAsmDiagHandler2(const llvm::SMDiagnostic &D,
     case llvm::DS_Warning:                                                     \
       DiagID = diag::warn_fe_##GroupName;                                      \
       break;                                                                   \
+    case llvm::DS_Remark:                                                      \
+      llvm_unreachable("'remark' severity not expected");                      \
+      break;                                                                   \
+    case llvm::DS_Note:                                                        \
+      DiagID = diag::note_fe_##GroupName;                                      \
+      break;                                                                   \
+    }                                                                          \
+  } while (false)
+
+#define ComputeDiagRemarkID(Severity, GroupName, DiagID)                       \
+  do {                                                                         \
+    switch (Severity) {                                                        \
+    case llvm::DS_Error:                                                       \
+      DiagID = diag::err_fe_##GroupName;                                       \
+      break;                                                                   \
+    case llvm::DS_Warning:                                                     \
+      DiagID = diag::warn_fe_##GroupName;                                      \
+      break;                                                                   \
+    case llvm::DS_Remark:                                                      \
+      DiagID = diag::remark_fe_##GroupName;                                    \
+      break;                                                                   \
     case llvm::DS_Note:                                                        \
       DiagID = diag::note_fe_##GroupName;                                      \
       break;                                                                   \
@@ -372,7 +393,7 @@ void BackendConsumer::DiagnosticHandlerImpl(const DiagnosticInfo &DI) {
     break;
   default:
     // Plugin IDs are not bound to any value as they are set dynamically.
-    ComputeDiagID(Severity, backend_plugin, DiagID);
+    ComputeDiagRemarkID(Severity, backend_plugin, DiagID);
     break;
   }
   std::string MsgStorage;

@@ -5,8 +5,8 @@
 // (excepting no_usable_data). As such, main() should call every function in
 // this test.
 
-// RUN: %clang %s -o - -emit-llvm -S -fprofile-instr-generate | FileCheck -check-prefix=PGOGEN %s
-// RUN: %clang %s -o - -emit-llvm -S -fprofile-instr-use=%S/Inputs/instr-profile.pgodata | FileCheck -check-prefix=PGOUSE %s
+// RUN: %clang_cc1 -triple x86_64-apple-macosx10.9 -main-file-name instr-profile.c %s -o - -emit-llvm -fprofile-instr-generate | FileCheck -check-prefix=PGOGEN %s
+// RUN: %clang_cc1 -triple x86_64-apple-macosx10.9 -main-file-name instr-profile.c %s -o - -emit-llvm -fprofile-instr-use=%S/Inputs/instr-profile.profdata | FileCheck -check-prefix=PGOUSE %s
 
 // PGOGEN: @[[SLC:__llvm_pgo_ctr[0-9]*]] = private global [4 x i64] zeroinitializer
 // PGOGEN: @[[IFC:__llvm_pgo_ctr[0-9]*]] = private global [11 x i64] zeroinitializer
@@ -18,6 +18,7 @@
 // PGOGEN: @[[BLC:__llvm_pgo_ctr[0-9]*]] = private global [9 x i64]  zeroinitializer
 // PGOGEN: @[[NOC:__llvm_pgo_ctr[0-9]*]] = private global [2 x i64]  zeroinitializer
 // PGOGEN: @[[MAC:__llvm_pgo_ctr[0-9]*]] = private global [1 x i64]  zeroinitializer
+// PGOGEN: @[[STC:__llvm_pgo_ctr[0-9]*]] = private global [2 x i64]  zeroinitializer
 
 // PGOGEN-LABEL: @simple_loops()
 // PGOUSE-LABEL: @simple_loops()
@@ -417,6 +418,19 @@ void boolop_loops() {
   // PGOUSE-NOT: br {{.*}} !prof ![0-9]+
 }
 
+void do_fallthrough() {
+  for (int i = 0; i < 10; ++i) {
+    int j = 0;
+    do {
+      // The number of exits out of this do-loop via the break statement
+      // exceeds the counter value for the loop (which does not include the
+      // fallthrough count). Make sure that does not violate any assertions.
+      if (i < 8) break;
+      j++;
+    } while (j < 2);
+  }
+}
+
 // PGOGEN-LABEL: @no_usable_data()
 // PGOUSE-LABEL: @no_usable_data()
 // PGOGEN: store {{.*}} @[[NOC]], i64 0, i64 0
@@ -430,6 +444,16 @@ void no_usable_data() {
 
   // PGOGEN-NOT: store {{.*}} @[[NOC]],
   // PGOUSE-NOT: br {{.*}} !prof ![0-9]+
+}
+
+// PGOGEN-LABEL: @static_func()
+// PGOUSE-LABEL: @static_func()
+// PGOGEN: store {{.*}} @[[STC]], i64 0, i64 0
+static void static_func() {
+  // PGOGEN: store {{.*}} @[[STC]], i64 0, i64 1
+  // PGOUSE: br {{.*}} !prof ![[ST1:[0-9]+]]
+  for (int i = 0; i < 10; ++i) {
+  }
 }
 
 // PGOUSE-DAG: ![[SL1]] = metadata !{metadata !"branch_weights", i32 101, i32 2}
@@ -500,6 +524,7 @@ void no_usable_data() {
 // PGOUSE-DAG: ![[BL6]] = metadata !{metadata !"branch_weights", i32 51, i32 2}
 // PGOUSE-DAG: ![[BL7]] = metadata !{metadata !"branch_weights", i32 26, i32 27}
 // PGOUSE-DAG: ![[BL8]] = metadata !{metadata !"branch_weights", i32 51, i32 2}
+// PGOUSE-DAG: ![[ST1]] = metadata !{metadata !"branch_weights", i32 11, i32 2}
 
 int main(int argc, const char *argv[]) {
   simple_loops();
@@ -510,6 +535,8 @@ int main(int argc, const char *argv[]) {
   big_switch();
   boolean_operators();
   boolop_loops();
+  do_fallthrough();
   no_usable_data();
+  static_func();
   return 0;
 }

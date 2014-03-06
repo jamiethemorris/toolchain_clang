@@ -1329,7 +1329,7 @@ static enum CXChildVisitResult PrintTypeSize(CXCursor cursor, CXCursor p,
     CXCursor Parent, Root;
     if (clang_getCursorKind(cursor) == CXCursor_FieldDecl ) {
       const char *RootParentName;
-      Root = Parent = p;
+      Parent = p;
       do {
         Root = Parent;
         RootParentName = clang_getCString(clang_getCursorSpelling(Root));
@@ -3736,6 +3736,7 @@ static const char *getDiagnosticCodeStr(enum CXLoadDiag_Error error) {
 static const char *getSeverityString(enum CXDiagnosticSeverity severity) {
   switch (severity) {
     case CXDiagnostic_Note: return "note";
+    case CXDiagnostic_Remark: return "remark";
     case CXDiagnostic_Error: return "error";
     case CXDiagnostic_Fatal: return "fatal";
     case CXDiagnostic_Ignored: return "ignored";
